@@ -1,0 +1,34 @@
+# --- Dépendances InvoiceGuard (utilisées pour le déploiement Render/Railway) ---
+# Ce fichier à la racine est requis par Render/Railway (build automatic).
+
+# API web
+fastapi==0.111.1
+uvicorn[standard]==0.30.6
+
+# ORM / base de données
+sqlalchemy==2.0.32
+# Driver PostgreSQL (nécessaire si DATABASE_URL pointe vers une base Postgres
+# fournie par Render/Railway en production)
+psycopg2-binary==2.9.9
+
+# Validations et configuration
+pydantic==2.8.2
+pydantic-settings==2.4.0
+# Validation d'emails (requis par EmailStr dans les schémas Pydantic)
+email-validator==2.3.0
+
+# Sécurité et authentification
+passlib==1.7.4
+# bcrypt contraint à <4.1 : compatible avec passlib 1.7.4
+bcrypt==4.0.1
+python-jose[cryptography]==3.3.0
+
+# Configuration d'environnement
+python-dotenv==1.0.1
+
+# Planification (rappel de factures en retard, etc.)
+apscheduler==3.10.4
+
+# Génération de PDF de factures
+jinja2==3.1.6
+reportlab==5.0.1

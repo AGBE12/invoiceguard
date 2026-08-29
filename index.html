@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InvoiceGuard — Interface de test</title>
+    <style>
+        :root {
+            --primary: #2980b9;
+            --primary-dark: #1f618d;
+            --success: #27ae60;
+            --danger: #c0392b;
+            --bg: #f4f6f8;
+            --card: #ffffff;
+            --text: #2c3e50;
+            --muted: #7f8c8d;
+            --border: #e5e9ec;
+            --radius: 10px;
+            --shadow: 0 2px 8px rgba(44, 62, 80, 0.08);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            padding: 24px;
+        }
+
+        header {
+            max-width: 960px;
+            margin: 0 auto 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        header h1 { font-size: 22px; color: var(--primary); }
+        header h1 span { font-weight: 400; color: var(--muted); font-size: 15px; }
+        .status-badge {
+            font-size: 12px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            background: #ecf0f1;
+            color: var(--muted);
+            font-weight: 600;
+        }
+        .status-badge.connected { background: #eafaf1; color: var(--success); }
+        .status-badge.disconnected { background: #fdf2f2; color: var(--danger); }
+
+        main { max-width: 960px; margin: 0 auto; display: grid; gap: 20px; }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            overflow: hidden;
+        }
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .card-header h2 { font-size: 16px; font-weight: 700; }
+        .card-body { padding: 20px; }
+
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr; } }
+
+        .form-group { margin-bottom: 14px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+        input[type="text"], input[type="email"], input[type="password"], input[type="number"], input[type="date"] {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 14px;
+            color: var(--text);
+            background: #fff;
+            transition: border-color 0.15s;
+        }
+        input:focus { outline: none; border-color: var(--primary); }
+        select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 14px;
+            color: var(--text);
+            background: #fff;
+        }
+
+        .row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+        button {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: filter 0.15s, transform 0.05s;
+            background: var(--primary);
+            color: #fff;
+        }
+        button:hover { filter: brightness(0.94); }
+        button:active { transform: translateY(1px); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.ghost { background: #ecf0f1; color: var(--text); }
+        button.success { background: var(--success); }
+        button.small { padding: 6px 10px; font-size: 12px; }
+
+        .msg {
+            margin-top: 12px;
+            font-size: 13px;
+            padding: 10px 12px;
+            border-radius: 6px;
+            display: none;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .msg.error { display: block; background: #fdf2f2; color: var(--danger); }
+        .msg.success { display: block; background: #eafaf1; color: var(--success); }
+        .msg.info { display: block; background: #eaf2f8; color: var(--primary-dark); }
+
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+        th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+        tr:last-child td { border-bottom: none; }
+
+        .pill {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: capitalize;
+        }
+        .pill.draft { background: #ecf0f1; color: var(--muted); }
+        .pill.sent { background: #fef9e7; color: #b7950b; }
+        .pill.paid { background: #eafaf1; color: var(--success); }
+        .pill.overdue { background: #fdf2f2; color: var(--danger); }
+
+        .empty { color: var(--muted); font-size: 14px; padding: 10px 0; }
+
+        footer { max-width: 960px; margin: 24px auto 0; text-align: center; font-size: 12px; color: var(--muted); }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>InvoiceGuard <span>— interface de test</span></h1>
+        <span id="statusBadge" class="status-badge disconnected">Déconnecté</span>
+    </header>
+
+    <main>
+        <!-- ============ SECTION 1 : AUTH ============ -->
+        <section class="card">
+            <div class="card-header"><h2>🔐 Authentification</h2></div>
+            <div class="card-body">
+                <div class="grid-2">
+                    <div class="form-group">
+                        <h3 style="font-size:14px; margin-bottom:10px;">Inscription <small style="color:var(--muted)">POST /auth/register</small></h3>
+                        <div class="form-group">
+                            <label for="regEmail">Email</label>
+                            <input type="email" id="regEmail" placeholder="vous@exemple.fr">
+                        </div>
+                        <div class="form-group">
+                            <label for="regPassword">Mot de passe (min. 8 car.)</label>
+                            <input type="password" id="regPassword" placeholder="••••••••">
+                        </div>
+                        <div class="form-group">
+                            <label for="regName">Nom complet</label>
+                            <input type="text" id="regName" placeholder="Jean Dupont">
+                        </div>
+                        <div class="form-group">
+                            <label for="regCompany">Nom de l'entreprise (optionnel)</label>
+                            <input type="text" id="regCompany" placeholder="Dupont Consulting">
+                        </div>
+                        <button id="registerBtn">S'inscrire</button>
+                    </div>
+
+                    <div class="form-group">
+                        <h3 style="font-size:14px; margin-bottom:10px;">Connexion <small style="color:var(--muted)">POST /auth/login</small></h3>
+                        <div class="form-group">
+                            <label for="logEmail">Email</label>
+                            <input type="email" id="logEmail" placeholder="vous@exemple.fr">
+                        </div>
+                        <div class="form-group">
+                            <label for="logPassword">Mot de passe</label>
+                            <input type="password" id="logPassword" placeholder="••••••••">
+                        </div>
+                        <div class="row">
+                            <button id="loginBtn">Se connecter</button>
+                            <button id="logoutBtn" class="ghost">Déconnexion</button>
+                        </div>
+                        <div id="authMsg" class="msg"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============ SECTION 2 : CLIENTS ============ -->
+        <section class="card">
+            <div class="card-header">
+                <h2>👥 Clients</h2>
+                <button id="listClientsBtn" class="success">Lister mes clients</button>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <h3 style="font-size:14px; margin-bottom:10px;">Créer un client <small style="color:var(--muted)">POST /clients</small></h3>
+                    <div class="row">
+                        <input type="text" id="cliName" placeholder="Nom du client *" style="flex:2;">
+                        <input type="email" id="cliEmail" placeholder="Email" style="flex:2;">
+                        <input type="text" id="cliPhone" placeholder="Téléphone" style="flex:1;">
+                    </div>
+                    <div class="form-group" style="margin-top:10px;">
+                        <input type="text" id="cliAddress" placeholder="Adresse" style="width:100%;">
+                    </div>
+                    <button id="createClientBtn">Créer le client</button>
+                </div>
+                <div id="clientsMsg" class="msg"></div>
+                <h4 style="font-size:13px; margin:16px 0 8px; color:var(--muted);">Liste des clients</h4>
+                <div id="clientsList" class="empty">Cliquez sur « Lister mes clients » pour afficher la liste.</div>
+            </div>
+        </section>
+
+        <!-- ============ SECTION 3 : FACTURES ============ -->
+        <section class="card">
+            <div class="card-header">
+                <h2>🧾 Factures</h2>
+                <button id="listInvoicesBtn" class="success">Lister mes factures</button>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <h3 style="font-size:14px; margin-bottom:10px;">Créer une facture <small style="color:var(--muted)">POST /invoices</small></h3>
+                    <div class="row">
+                        <select id="invClientId"></select>
+                    </div>
+                    <div class="row" style="margin-top:10px;">
+                        <input type="number" id="invAmount" placeholder="Montant (ex: 199.99)" step="0.01" min="0" style="flex:2;">
+                        <input type="date" id="invDueDate" style="flex:1;">
+                    </div>
+                    <button id="createInvoiceBtn" style="margin-top:10px;">Créer la facture</button>
+                </div>
+                <div id="invoicesMsg" class="msg"></div>
+                <div id="invoicesList" class="empty">Cliquez sur « Lister mes factures » pour afficher la liste.</div>
+            </div>
+        </section>
+    </main>
+
+    <footer>InvoiceGuard · API locale · auth, clients, factures</footer>
+
+    <script>
+        // ------------------------------------------------------------------
+        // Configuration
+        // ------------------------------------------------------------------
+        const API_BASE = "http://127.0.0.1:8000";
+
+        const $ = (id) => document.getElementById(id);
+        const statusBadge = $("statusBadge");
+
+        const regEmail = $("regEmail"), regPassword = $("regPassword"),
+              regName = $("regName"), regCompany = $("regCompany");
+        const logEmail = $("logEmail"), logPassword = $("logPassword");
+        const authMsg = $("authMsg");
+
+        const cliName = $("cliName"), cliEmail = $("cliEmail"),
+              cliPhone = $("cliPhone"), cliAddress = $("cliAddress");
+        const clientsMsg = $("clientsMsg"), clientsList = $("clientsList");
+
+        const invClientId = $("invClientId"), invAmount = $("invAmount"), invDueDate = $("invDueDate");
+        const invoicesMsg = $("invoicesMsg"), invoicesList = $("invoicesList");
+
+        // ------------------------------------------------------------------
+        // Helpers
+        // ------------------------------------------------------------------
+        function getToken() { return localStorage.getItem("access_token"); }
+
+        function setToken(token) {
+            if (token) localStorage.setItem("access_token", token);
+            else localStorage.removeItem("access_token");
+            refreshAuthUI();
+        }
+
+        function authHeaders() {
+            const headers = { "Content-Type": "application/json" };
+            const token = getToken();
+            if (token) headers["Authorization"] = "Bearer " + token;
+            return headers;
+        }
+
+        function refreshAuthUI() {
+            const connected = !!getToken();
+            statusBadge.textContent = connected ? "Connecté" : "Déconnecté";
+            statusBadge.className = "status-badge " + (connected ? "connected" : "disconnected");
+        }
+
+        function show(el, msg, className) {
+            el.textContent = msg;
+            el.className = "msg " + className;
+        }
+
+        async function api(url, options = {}) {
+            const res = await fetch(API_BASE + url, options);
+            const contentType = res.headers.get("content-type") || "";
+            const body = contentType.includes("application/json")
+                ? await res.json()
+                : await res.text();
+
+            if (!res.ok) {
+                let detail = body;
+                if (body && typeof body === "object" && "detail" in body) {
+                    detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+                }
+                const err = new Error(detail || ("HTTP " + res.status));
+                err.status = res.status;
+                throw err;
+            }
+            return { status: res.status, body };
+        }
+
+        function formatAmount(amount) {
+            const n = Number(amount);
+            return isNaN(n) ? amount : n.toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+        }
+
+        function pill(status) {
+            const safe = String(status).toLowerCase();
+            return '<span class="pill ' + safe + '">' + safe + "</span>";
+        }
+
+        function escapeHtml(str) {
+            return String(str ?? "").replace(/[&<>"']/g, (m) => ({
+                "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+            }[m]));
+        }
+
+        // ------------------------------------------------------------------
+        // SECTION 1 : AUTH
+        // ------------------------------------------------------------------
+        $("registerBtn").addEventListener("click", async () => {
+            show(authMsg, "", "info");
+            try {
+                const payload = {
+                    email: regEmail.value.trim(),
+                    password: regPassword.value,
+                    full_name: regName.value.trim(),
+                };
+                if (regCompany.value.trim()) payload.company_name = regCompany.value.trim();
+                if (!payload.email || !payload.password || !payload.full_name) {
+                    return show(authMsg, "Email, mot de passe et nom sont obligatoires.", "error");
+                }
+                const r = await api("/auth/register", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+                show(authMsg, "✅ Compte créé pour " + r.body.email + ", vous pouvez vous connecter.", "success");
+                logEmail.value = payload.email;
+            } catch (e) {
+                show(authMsg, "Erreur inscription : " + e.message, "error");
+            }
+        });
+
+        $("loginBtn").addEventListener("click", async () => {
+            show(authMsg, "", "info");
+            try {
+                const email = logEmail.value.trim();
+                const password = logPassword.value;
+                if (!email || !password) return show(authMsg, "Renseignez email et mot de passe.", "error");
+
+                const r = await api("/auth/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                    body: "username=" + encodeURIComponent(email) + "&password=" + encodeURIComponent(password),
+                });
+
+                setToken(r.body.access_token);
+                show(authMsg, "✅ Connecté en tant que " + email, "success");
+            } catch (e) {
+                show(authMsg, "Erreur connexion : " + e.message, "error");
+            }
+        });
+
+        $("logoutBtn").addEventListener("click", () => {
+            setToken(null);
+            show(authMsg, "Vous êtes déconnecté.", "info");
+            clientsList.className = "empty";
+            clientsList.textContent = "Cliquez sur « Lister mes clients » pour afficher la liste.";
+            invoicesList.className = "empty";
+            invoicesList.textContent = "Cliquez sur « Lister mes factures » pour afficher la liste.";
+        });
+
+        // ------------------------------------------------------------------
+        // SECTION 2 : CLIENTS
+        // ------------------------------------------------------------------
+        async function loadClients(selectOnly = false) {
+            const list = await api("/clients", { headers: authHeaders() });
+            const clients = list.body;
+
+            invClientId.innerHTML = "";
+            clients.forEach((c) => {
+                const opt = document.createElement("option");
+                opt.value = c.id;
+                opt.textContent = c.name + (c.email ? " (" + c.email + ")" : "");
+                invClientId.appendChild(opt);
+            });
+            if (clients.length === 0) {
+                const opt = document.createElement("option");
+                opt.value = "";
+                opt.textContent = "Aucun client — créez-en un d'abord";
+                invClientId.appendChild(opt);
+            }
+            return clients;
+        }
+
+        async function renderClients() {
+            try {
+                const clients = await loadClients();
+                if (clients.length === 0) {
+                    clientsList.className = "empty";
+                    clientsList.textContent = "Aucun client pour le moment.";
+                    return;
+                }
+                clientsList.className = "";
+                clientsList.innerHTML =
+                    "<table><thead><tr><th>Nom</th><th>Email</th><th>Téléphone</th><th>Adresse</th></tr></thead><tbody>" +
+                    clients.map((c) =>
+                        "<tr>" +
+                        "<td>" + escapeHtml(c.name) + "</td>" +
+                        "<td>" + escapeHtml(c.email || "—") + "</td>" +
+                        "<td>" + escapeHtml(c.phone || "—") + "</td>" +
+                        "<td>" + escapeHtml(c.address || "—") + "</td>" +
+                        "</tr>"
+                    ).join("") +
+                    "</tbody></table>";
+            } catch (e) {
+                clientsList.className = "";
+                clientsList.innerHTML = '<div class="empty">Erreur : ' + escapeHtml(e.message) + "</div>";
+            }
+        }
+
+        $("listClientsBtn").addEventListener("click", async () => {
+            show(clientsMsg, "", "info");
+            if (!getToken()) return show(clientsMsg, "Connectez-vous d'abord.", "error");
+            await renderClients();
+        });
+
+        $("createClientBtn").addEventListener("click", async () => {
+            show(clientsMsg, "", "info");
+            if (!getToken()) return show(clientsMsg, "Connectez-vous d'abord.", "error");
+            const name = cliName.value.trim();
+            if (!name) return show(clientsMsg, "Le nom du client est obligatoire.", "error");
+
+            const payload = { name };
+            if (cliEmail.value.trim()) payload.email = cliEmail.value.trim();
+            if (cliPhone.value.trim()) payload.phone = cliPhone.value.trim();
+            if (cliAddress.value.trim()) payload.address = cliAddress.value.trim();
+
+            try {
+                const r = await api("/clients", {
+                    method: "POST",
+                    headers: authHeaders(),
+                    body: JSON.stringify(payload),
+                });
+                show(clientsMsg, "✅ Client « " + r.body.name + " » créé (id " + r.body.id + ").", "success");
+                cliName.value = ""; cliEmail.value = ""; cliPhone.value = ""; cliAddress.value = "";
+                await renderClients();
+            } catch (e) {
+                show(clientsMsg, "Erreur : " + e.message, "error");
+            }
+        });
+
+        // ------------------------------------------------------------------
+        // SECTION 3 : FACTURES
+        // ------------------------------------------------------------------
+        async function renderInvoices() {
+            try {
+                const list = await api("/invoices", { headers: authHeaders() });
+                const invoices = list.body;
+                if (invoices.length === 0) {
+                    invoicesList.className = "empty";
+                    invoicesList.textContent = "Aucune facture pour le moment.";
+                    return;
+                }
+                invoicesList.className = "";
+                invoicesList.innerHTML =
+                    "<table><thead><tr>" +
+                    "<th>N°</th><th>Client</th><th>Montant</th><th>Statut</th><th></th>" +
+                    "</tr></thead><tbody>" +
+                    invoices.map((inv) => {
+                        const clientName = inv.client_name || "id " + inv.client_id;
+                        const paid = String(inv.status).toLowerCase() === "paid";
+                        return "<tr>" +
+                            "<td>" + escapeHtml(inv.invoice_number) + "</td>" +
+                            "<td>" + escapeHtml(clientName) + "</td>" +
+                            "<td>" + formatAmount(inv.amount) + "</td>" +
+                            "<td>" + pill(inv.status) + "</td>" +
+                            "<td>" + (paid
+                                ? '<span class="empty">Payée ✓</span>'
+                                : '<button class="success small" data-pay="' + inv.id + '">Marquer comme Payée</button>'
+                            ) +
+                            "</td></tr>";
+                    }).join("") +
+                    "</tbody></table>";
+
+                invoicesList.querySelectorAll("[data-pay]").forEach((btn) => {
+                    btn.addEventListener("click", async () => {
+                        btn.disabled = true;
+                        btn.textContent = "…";
+                        try {
+                            const r = await api("/invoices/" + btn.dataset.pay + "/pay", {
+                                method: "PUT",
+                                headers: authHeaders(),
+                            });
+                            show(invoicesMsg, "✅ Facture « " + r.body.invoice_number + " » marquée comme payée.", "success");
+                            await renderInvoices();
+                        } catch (e) {
+                            btn.disabled = false;
+                            btn.textContent = "Marquer comme Payée";
+                            show(invoicesMsg, "Erreur : " + e.message, "error");
+                        }
+                    });
+                });
+            } catch (e) {
+                invoicesList.className = "";
+                invoicesList.innerHTML = '<div class="empty">Erreur : ' + escapeHtml(e.message) + "</div>";
+            }
+        }
+
+        $("listInvoicesBtn").addEventListener("click", async () => {
+            show(invoicesMsg, "", "info");
+            if (!getToken()) return show(invoicesMsg, "Connectez-vous d'abord.", "error");
+            await renderInvoices();
+        });
+
+        $("createInvoiceBtn").addEventListener("click", async () => {
+            show(invoicesMsg, "", "info");
+            if (!getToken()) return show(invoicesMsg, "Connectez-vous d'abord.", "error");
+            const clientId = invClientId.value;
+            const amount = invAmount.value;
+            if (!clientId) return show(invoicesMsg, "Sélectionnez un client.", "error");
+            if (!amount || Number(amount) <= 0) return show(invoicesMsg, "Saisissez un montant valide.", "error");
+
+            const payload = { client_id: Number(clientId), amount: Number(amount), status: "draft" };
+            if (invDueDate.value) payload.due_date = invDueDate.value;
+
+            try {
+                const r = await api("/invoices", {
+                    method: "POST",
+                    headers: authHeaders(),
+                    body: JSON.stringify(payload),
+                });
+                show(invoicesMsg, "✅ Facture « " + r.body.invoice_number + " » créée.", "success");
+                invAmount.value = ""; invDueDate.value = "";
+                await renderInvoices();
+            } catch (e) {
+                show(invoicesMsg, "Erreur : " + e.message, "error");
+            }
+        });
+
+        // ------------------------------------------------------------------
+        // Initialisation
+        // ------------------------------------------------------------------
+        (async function init() {
+            refreshAuthUI();
+            if (getToken()) {
+                try { await loadClients(true); } catch (e) { /* silencieux */ }
+            }
+        })();
+    </script>
+</body>
+</html>

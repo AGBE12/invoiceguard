@@ -1,0 +1,42 @@
+# --- Dépendances du MVP InvoiceGuard (FastAPI + SQLAlchemy 2.0) ---
+# Compatible Python 3.8
+
+# API web
+fastapi==0.111.1
+uvicorn[standard]==0.30.6
+# ORM / base de données
+sqlalchemy==2.0.32
+# Driver PostgreSQL (si DATABASE_URL pointe en prod vers PostgreSQL)
+psycopg2-binary==2.9.9
+
+# ORM / base de données
+sqlalchemy==2.0.32
+
+# Validations et configuration
+pydantic==2.8.2
+pydantic-settings==2.4.0
+# Validation d'emails (requis par EmailStr dans les schémas Pydantic)
+email-validator==2.3.0
+
+# Sécurité et authentification
+passlib==1.7.4
+# bcrypt contraint à <4.1 : compatible avec passlib 1.7.4
+# (bcrypt >= 4.1 a supprimé __about__, ce qui casse passlib)
+bcrypt==4.0.1
+python-jose[cryptography]==3.3.0
+
+# Configuration d'environnement
+python-dotenv==1.0.1
+
+# Planification (rappel de factures en retard, etc.)
+apscheduler==3.10.4
+
+# Génération de PDF de factures
+# Jinja2 : rendu du template HTML de la facture
+jinja2==3.1.6
+# WeasyPrint : compilation HTML+CSS -> PDF (nécessite libs système pango/cairo)
+# Sur macOS Catalina sans Homebrew, reportlab est utilisé comme fallback.
+# weasyprint est installé séparément (optionnel) car il exige des libs système.
+reportlab==5.0.1
+
+

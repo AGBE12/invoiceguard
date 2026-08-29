@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Environnement et secrets
+.env
+*.env
+
+# Base de données locale
+*.db
+*.sqlite3
+
+# Logs / divers
+*.log
+.DS_Store

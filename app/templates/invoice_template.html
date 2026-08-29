@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Facture {{ invoice.number }}</title>
+    <style>
+        body {
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            color: #2c3e50;
+            margin: 0;
+            padding: 0;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 40px;
+        }
+        .brand h1 {
+            margin: 0;
+            color: #2980b9;
+            font-size: 26px;
+        }
+        .brand p {
+            margin: 2px 0;
+            color: #7f8c8d;
+        }
+        .invoice-title {
+            text-align: right;
+        }
+        .invoice-title h2 {
+            margin: 0;
+            color: #34495e;
+        }
+        .invoice-title .number {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2980b9;
+        }
+        .parties {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+        }
+        .party {
+            width: 48%;
+        }
+        .party h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #7f8c8d;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 6px;
+        }
+        .party p {
+            margin: 3px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 30px;
+        }
+        th, td {
+            padding: 12px;
+            border-bottom: 1px solid #ecf0f1;
+            text-align: left;
+        }
+        th {
+            background-color: #f8f9fa;
+            color: #34495e;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .amount {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        .total-row td {
+            font-weight: bold;
+            font-size: 18px;
+            border-top: 2px solid #2980b9;
+            border-bottom: none;
+            color: #2c3e50;
+        }
+        .meta {
+            margin-top: 20px;
+            color: #7f8c8d;
+            font-size: 13px;
+        }
+        .meta p {
+            margin: 3px 0;
+        }
+        .footer {
+            margin-top: 50px;
+            text-align: center;
+            color: #bdc3c7;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="brand">
+            <h1>{{ invoice.company_name or invoice.freelance_name }}</h1>
+            <p>{{ invoice.freelance_email }}</p>
+            {% if invoice.freelance_phone %}<p>{{ invoice.freelance_phone }}</p>{% endif %}
+            {% if invoice.freelance_address %}<p>{{ invoice.freelance_address }}</p>{% endif %}
+        </div>
+        <div class="invoice-title">
+            <h2>FACTURE</h2>
+            <p class="number">{{ invoice.number }}</p>
+            <p>Date d'émission : {{ invoice.issue_date }}</p>
+            {% if invoice.due_date %}<p>Échéance : {{ invoice.due_date }}</p>{% endif %}
+        </div>
+    </div>
+
+    <div class="parties">
+        <div class="party">
+            <h3>Facture à</h3>
+            <p><strong>{{ invoice.client.name }}</strong></p>
+            {% if invoice.client.email %}<p>{{ invoice.client.email }}</p>{% endif %}
+            {% if invoice.client.phone %}<p>{{ invoice.client.phone }}</p>{% endif %}
+            {% if invoice.client.address %}<p>{{ invoice.client.address }}</p>{% endif %}
+        </div>
+        <div class="party">
+            <h3>De</h3>
+            <p><strong>{{ invoice.freelance_name }}</strong></p>
+            {% if invoice.freelance_company %}<p>{{ invoice.freelance_company }}</p>{% endif %}
+            <p>{{ invoice.freelance_email }}</p>
+            {% if invoice.freelance_phone %}<p>{{ invoice.freelance_phone }}</p>{% endif %}
+            {% if invoice.freelance_address %}<p>{{ invoice.freelance_address }}</p>{% endif %}
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Désignation</th>
+                <th style="text-align: right;">Prix HT</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Prestation facturée</td>
+                <td class="amount">{{ "%.2f"|format(invoice.amount) }} €</td>
+            </tr>
+            <tr class="total-row">
+                <td>Total HT</td>
+                <td class="amount">{{ "%.2f"|format(invoice.amount) }} €</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="meta">
+        <p>Statut : {{ invoice.status }}</p>
+        <p>N° de facture : {{ invoice.number }}</p>
+    </div>
+
+    <div class="footer">
+        <p>Merci pour votre confiance.</p>
+    </div>
+</body>
+</html>
