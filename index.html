@@ -241,7 +241,7 @@
                         <select id="invClientId"></select>
                     </div>
                     <div class="row" style="margin-top:10px;">
-                        <input type="number" id="invAmount" placeholder="Montant (ex: 199.99)" step="0.01" min="0" style="flex:2;">
+                        <input type="number" id="invAmount" placeholder="Montant en FCFA (ex: 50000)" step="0.01" min="0" style="flex:2;">
                         <input type="date" id="invDueDate" style="flex:1;">
                     </div>
                     <button id="createInvoiceBtn" style="margin-top:10px;">Créer la facture</button>
@@ -256,9 +256,18 @@
 
     <script>
         // ------------------------------------------------------------------
-        // Configuration
+        // Configuration de l'API
         // ------------------------------------------------------------------
-        const API_BASE = "http://127.0.0.1:8000";
+        // Détection automatique de l'environnement :
+        //  - Si la page est servie localement (localhost / 127.0.0.1), on
+        //    cible l'API déployée sur Render (constante ci-dessous).
+        //  - Sinon (page hébergée sur Render ou autre hôte), on utilise la
+        //    même origine que la page (cas où front et API sont ensemble).
+        const LOCAL_API_BASE = "https://invoiceguard-api-uydt.onrender.com";
+        const siteOrigin = window.location.origin;
+        const isLocal = ["localhost", "127.0.0.1"].some((h) => siteOrigin.includes(h));
+        const API_BASE = isLocal ? LOCAL_API_BASE : siteOrigin;
+
 
         const $ = (id) => document.getElementById(id);
         const statusBadge = $("statusBadge");
@@ -325,7 +334,11 @@
 
         function formatAmount(amount) {
             const n = Number(amount);
-            return isNaN(n) ? amount : n.toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+            if (isNaN(n)) return amount;
+            // Format FCFA : séparateur de milliers = espace, pas de décimale.
+            // Ex. 50000 -> "50 000 FCFA"
+            const formatted = Math.round(n).toLocaleString("fr-FR");
+            return formatted + " FCFA";
         }
 
         function pill(status) {
@@ -495,15 +508,23 @@
                     invoices.map((inv) => {
                         const clientName = inv.client_name || "id " + inv.client_id;
                         const paid = String(inv.status).toLowerCase() === "paid";
+                        const safeNumber = String(inv.invoice_number).replace(/[^a-zA-Z0-9\-_]/g, "_");
                         return "<tr>" +
                             "<td>" + escapeHtml(inv.invoice_number) + "</td>" +
                             "<td>" + escapeHtml(clientName) + "</td>" +
                             "<td>" + formatAmount(inv.amount) + "</td>" +
                             "<td>" + pill(inv.status) + "</td>" +
-                            "<td>" + (paid
-                                ? '<span class="empty">Payée ✓</span>'
-                                : '<button class="success small" data-pay="' + inv.id + '">Marquer comme Payée</button>'
-                            ) +
+                            "<td>" +
+                                (paid
+                                    ? '<span class="empty">Payée ✓</span>'
+                                    : '<button class="success small" data-pay="' + inv.id + '">Marquer comme Payée</button>'
+                                ) +
+                                ' <button class="small" data-download="' + inv.id + '" data-name="' + safeNumber + '">Télécharger PDF 📥</button>' +
+                                ' <button class="small" data-email="' + inv.id + '">Envoyer par e-mail 📧</button>' +
+                                (paid
+                                    ? ""
+                                    : ' <button class="small" data-checkout="' + inv.id + '">Payer par carte 💳</button>'
+                                ) +
                             "</td></tr>";
                     }).join("") +
                     "</tbody></table>";
@@ -523,6 +544,123 @@
                             btn.disabled = false;
                             btn.textContent = "Marquer comme Payée";
                             show(invoicesMsg, "Erreur : " + e.message, "error");
+                        }
+                    });
+                });
+
+                // Téléchargement PDF : fetch -> blob -> lien invisible -> téléchargement.
+                invoicesList.querySelectorAll("[data-download]").forEach((btn) => {
+                    btn.addEventListener("click", async () => {
+                        const id = btn.dataset.download;
+                        const name = btn.dataset.name || ("invoice_" + id);
+                        btn.disabled = true;
+                        btn.textContent = "…";
+                        try {
+                            const token = getToken();
+                            const res = await fetch(
+                                API_BASE + "/invoices/" + id + "/download",
+                                { headers: token ? { "Authorization": "Bearer " + token } : {} }
+                            );
+                            if (!res.ok) {
+                                throw new Error("HTTP " + res.status + " — le PDF n'a pas pu être généré");
+                            }
+                            const blob = await res.blob();
+                            const url = URL.createObjectURL(blob);
+
+                            // Lien invisible pour déclencher l'enregistrement automatique.
+                            const a = document.createElement("a");
+                            a.href = url;
+                            a.download = "facture_" + name + ".pdf";
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+
+                            show(invoicesMsg, "✅ PDF « facture_" + name + ".pdf » téléchargé.", "success");
+                        } catch (e) {
+                            show(invoicesMsg, "Erreur téléchargement : " + e.message, "error");
+                        } finally {
+                            btn.disabled = false;
+                            btn.textContent = "Télécharger PDF 📥";
+                        }
+                    });
+                });
+
+                // Envoi par e-mail : POST -> confirme l'envoi de la facture au client.
+                invoicesList.querySelectorAll("[data-email]").forEach((btn) => {
+                    btn.addEventListener("click", async () => {
+                        const id = btn.dataset.email;
+                        const token = getToken();
+                        if (!token) return show(invoicesMsg, "Connectez-vous d'abord.", "error");
+
+                        // Anti double-clic + état "en cours".
+                        const original = btn.textContent;
+                        btn.disabled = true;
+                        btn.textContent = "Envoi en cours...";
+
+                        try {
+                            const res = await fetch(
+                                API_BASE + "/api/invoices/" + id + "/send-email",
+                                {
+                                    method: "POST",
+                                    headers: { "Authorization": "Bearer " + token },
+                                }
+                            );
+
+                            if (!res.ok) {
+                                let detail = "HTTP " + res.status;
+                                try { detail = (await res.json()).detail || detail; } catch (_) {}
+                                throw new Error(detail);
+                            }
+
+                            show(invoicesMsg, "✅ E-mail envoyé avec succès au client !", "success");
+                        } catch (e) {
+                            btn.disabled = false;
+                            btn.textContent = original;
+                            show(invoicesMsg, "Erreur envoi e-mail : " + e.message, "error");
+                        }
+                    });
+                });
+
+                // Paiement Stripe Checkout : POST -> récupère checkout_url -> redirige.
+                invoicesList.querySelectorAll("[data-checkout]").forEach((btn) => {
+                    btn.addEventListener("click", async () => {
+                        const id = btn.dataset.checkout;
+                        const token = getToken();
+                        if (!token) return show(invoicesMsg, "Connectez-vous d'abord.", "error");
+
+                        // Anti double-clic : désactive le bouton pendant la requête.
+                        btn.disabled = true;
+                        const original = btn.textContent;
+                        btn.textContent = "…";
+
+                        try {
+                            const res = await fetch(
+                                API_BASE + "/api/invoices/" + id + "/checkout",
+                                {
+                                    method: "POST",
+                                    headers: { "Authorization": "Bearer " + token },
+                                }
+                            );
+
+                            if (!res.ok) {
+                                let detail = "HTTP " + res.status;
+                                try { detail = (await res.json()).detail || detail; } catch (_) {}
+                                throw new Error(detail);
+                            }
+
+                            const data = await res.json();
+                            if (!data.checkout_url) {
+                                throw new Error("Stripe n'a pas renvoyé d'URL de paiement.");
+                            }
+
+                            // Redirection immédiate vers le portail de paiement Stripe.
+                            window.location.href = data.checkout_url;
+                        } catch (e) {
+                            // Réaffiche le bouton d'origine si la redirection échoue.
+                            btn.disabled = false;
+                            btn.textContent = original;
+                            show(invoicesMsg, "Erreur paiement : " + e.message, "error");
                         }
                     });
                 });

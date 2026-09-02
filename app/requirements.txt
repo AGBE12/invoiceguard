@@ -28,6 +28,9 @@ python-jose[cryptography]==3.3.0
 # Configuration d'environnement
 python-dotenv==1.0.1
 
+# Paiement en ligne (Stripe Checkout)
+stripe>=9.0.0,<11.0.0
+
 # Planification (rappel de factures en retard, etc.)
 apscheduler==3.10.4
 

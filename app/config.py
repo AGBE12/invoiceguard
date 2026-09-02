@@ -43,8 +43,25 @@ class Settings(BaseSettings):
     allowed_origins: str = (
         "http://localhost:3000,"
         "http://localhost:5173,"
-        "http://127.0.0.1:5500"
+        "http://127.0.0.1:5500,"
+        "http://localhost:5500"
     )
+
+    # --- Stripe (paiement en ligne) ---
+    # Clé secrète Stripe : "sk_test_..." en dev, "sk_live_..." en production.
+    # À remplacer par la vraie valeur dans les variables d'environnement.
+    stripe_secret_key: str = ""
+
+    # Secret de signature du webhook Stripe (clé "whsec_...").
+    stripe_webhook_secret: str = ""
+
+    # Devise par défaut. Le FCFA (XOF) est une devise SANS DÉCIMAL sur Stripe :
+    # le montant est transmis tel quel (sans multiplication par 100).
+    stripe_currency: str = "xof"
+
+    # URLs de retour après le paiement Stripe Checkout.
+    checkout_success_url: str = "http://localhost:8000/?success=true"
+    checkout_cancel_url: str = "http://localhost:8000/?cancel=true"
 
 
 @lru_cache
@@ -55,3 +72,4 @@ def get_settings() -> Settings:
 
 # Instance partagée utilisée dans toute l'application
 settings = get_settings()
+

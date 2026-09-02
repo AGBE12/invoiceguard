@@ -29,18 +29,42 @@ class PDFGenerationError(Exception):
     """Levée lorsqu'une erreur explicite survient lors de la génération du PDF."""
 
 
+def format_fcfa(amount) -> str:
+    """Formate un montant en FCFA, sans décimales superflues.
+
+    Ex. 50000 -> "50 000 FCFA"  (espace comme séparateur de milliers).
+
+    Args:
+        amount: nombre (Decimal / float / str) représentant un montant.
+
+    Returns:
+        Chaîne au format "<milliers espacés> FCFA".
+    """
+    value = _to_float(amount)
+    integer = int(round(value))
+    formatted = f"{integer:,}".replace(",", " ")
+    return f"{formatted} FCFA"
+
+
 def _build_env() -> Environment:
-    """Retourne un environnement Jinja2 configuré sur le dossier des templates."""
+    """Retourne un environnement Jinja2 configuré sur le dossier des templates.
+
+    Enregistre le filtre ``fcfa`` afin de formater les montants directement
+    dans le modèle HTML (ex: ``{{ invoice.amount | fcfa }}``).
+    """
     if not TEMPLATES_DIR.is_dir():
         raise PDFGenerationError(
             f"Le dossier des templates '{TEMPLATES_DIR}' est introuvable."
         )
-    return Environment(
+    env = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
         autoescape=True,
         trim_blocks=True,
         lstrip_blocks=True,
     )
+    # Filtre maison : formate un montant en "X XXXX FCFA".
+    env.filters["fcfa"] = format_fcfa
+    return env
 
 
 def render_invoice_html(invoice_data: dict) -> str:
@@ -361,11 +385,12 @@ def _generate_pdf_reportlab(context: dict) -> bytes:
     parties.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
     story.append(parties)
 
-    # ---- Table des montants ----
+    # ---- Table des montants (en FCFA) ----
+    amount_fcfa = format_fcfa(amount)
     data = [
         ["Désignation", "Prix HT"],
-        ["Prestation facturée", f"{amount:,.2f} €".replace(",", " ").replace(".", ",")],
-        ["Total HT", f"{amount:,.2f} €".replace(",", " ").replace(".", ",")],
+        ["Prestation facturée", amount_fcfa],
+        ["Total HT", amount_fcfa],
     ]
     amounts_table = Table(data, colWidths=[130 * mm, 45 * mm])
     amounts_table.setStyle(TableStyle([

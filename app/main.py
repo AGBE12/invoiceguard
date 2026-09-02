@@ -50,8 +50,23 @@ def read_root() -> dict:
 
 
 # --- Routers ---
-from app.routers import auth, clients, invoices  # noqa: E402
+from app.routers import auth, clients, invoices, stripe  # noqa: E402
 
 app.include_router(auth.router)
 app.include_router(clients.router)
 app.include_router(invoices.router)
+app.include_router(stripe.router)
+
+# --- Initialisation Stripe ---
+# Configure la clé secrète au démarrage. Si la clé est manquante, on log
+# un avertissement sans bloquer le démarrage (les endpoints Stripe
+# renverront alors une erreur explicite).
+try:
+    from app.services import stripe_service
+
+    stripe_service.configure_stripe()
+except RuntimeError as exc:
+    import logging
+
+    logging.getLogger(__name__).warning("Stripe non configuré : %s", exc)
+
