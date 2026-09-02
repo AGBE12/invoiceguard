@@ -240,8 +240,24 @@
                     <div class="row">
                         <select id="invClientId"></select>
                     </div>
+                    <div class="row" style="margin-top:10px; align-items:flex-end;">
+                        <div class="form-group" style="flex:2; margin-bottom:0;">
+                            <label for="invDescription">Désignation</label>
+                            <input type="text" id="invDescription" placeholder="Ex: Prestation de développement">
+                        </div>
+                        <div class="form-group" style="flex:1; margin-bottom:0;">
+                            <label for="invQuantity">Quantité</label>
+                            <input type="number" id="invQuantity" value="1" min="1">
+                        </div>
+                        <div class="form-group" style="flex:2; margin-bottom:0;">
+                            <label for="invUnitPrice">Prix Unitaire (FCFA)</label>
+                            <input type="number" id="invUnitPrice" placeholder="Ex: 50000" min="0">
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top:10px; font-size:13px; color:var(--muted);">
+                        <span id="invTotalDisplay">Montant Total Calculé : 0 FCFA</span>
+                    </div>
                     <div class="row" style="margin-top:10px;">
-                        <input type="number" id="invAmount" placeholder="Montant en FCFA (ex: 50000)" step="0.01" min="0" style="flex:2;">
                         <input type="date" id="invDueDate" style="flex:1;">
                     </div>
                     <button id="createInvoiceBtn" style="margin-top:10px;">Créer la facture</button>
@@ -281,7 +297,9 @@
               cliPhone = $("cliPhone"), cliAddress = $("cliAddress");
         const clientsMsg = $("clientsMsg"), clientsList = $("clientsList");
 
-        const invClientId = $("invClientId"), invAmount = $("invAmount"), invDueDate = $("invDueDate");
+        const invClientId = $("invClientId"), invDueDate = $("invDueDate");
+        const invDescription = $("invDescription"), invQuantity = $("invQuantity"),
+              invUnitPrice = $("invUnitPrice"), invTotalDisplay = $("invTotalDisplay");
         const invoicesMsg = $("invoicesMsg"), invoicesList = $("invoicesList");
 
         // ------------------------------------------------------------------
@@ -670,6 +688,21 @@
             }
         }
 
+        // ------------------------------------------------------------------
+        // Calcul automatique du montant total (Quantité x Prix Unitaire)
+        // ------------------------------------------------------------------
+        function updateTotalDisplay() {
+            const qty = Number(invQuantity.value) || 0;
+            const price = Number(invUnitPrice.value) || 0;
+            const total = qty * price;
+            invTotalDisplay.textContent = "Montant Total Calculé : " + formatAmount(total);
+        }
+
+        ["input", "change"].forEach((evt) => {
+            invQuantity.addEventListener(evt, updateTotalDisplay);
+            invUnitPrice.addEventListener(evt, updateTotalDisplay);
+        });
+
         $("listInvoicesBtn").addEventListener("click", async () => {
             show(invoicesMsg, "", "info");
             if (!getToken()) return show(invoicesMsg, "Connectez-vous d'abord.", "error");
@@ -680,11 +713,25 @@
             show(invoicesMsg, "", "info");
             if (!getToken()) return show(invoicesMsg, "Connectez-vous d'abord.", "error");
             const clientId = invClientId.value;
-            const amount = invAmount.value;
-            if (!clientId) return show(invoicesMsg, "Sélectionnez un client.", "error");
-            if (!amount || Number(amount) <= 0) return show(invoicesMsg, "Saisissez un montant valide.", "error");
+            const description = invDescription.value.trim();
+            const quantity = Number(invQuantity.value);
+            const unitPrice = Number(invUnitPrice.value);
+            const amount = quantity * unitPrice;
 
-            const payload = { client_id: Number(clientId), amount: Number(amount), status: "draft" };
+            if (!clientId) return show(invoicesMsg, "Sélectionnez un client.", "error");
+            if (!description) return show(invoicesMsg, "Saisissez une désignation pour la facture.", "error");
+            if (!quantity || quantity < 1) return show(invoicesMsg, "Saisissez une quantité valide (≥ 1).", "error");
+            if (!unitPrice || unitPrice < 0) return show(invoicesMsg, "Saisissez un prix unitaire valide.", "error");
+            if (amount <= 0) return show(invoicesMsg, "Saisissez un montant valide.", "error");
+
+            const payload = {
+                client_id: Number(clientId),
+                description: description,
+                quantity: quantity,
+                unit_price: unitPrice,
+                amount: amount,
+                status: "draft",
+            };
             if (invDueDate.value) payload.due_date = invDueDate.value;
 
             try {
@@ -694,7 +741,8 @@
                     body: JSON.stringify(payload),
                 });
                 show(invoicesMsg, "✅ Facture « " + r.body.invoice_number + " » créée.", "success");
-                invAmount.value = ""; invDueDate.value = "";
+                invDescription.value = ""; invQuantity.value = 1; invUnitPrice.value = "";
+                invDueDate.value = ""; updateTotalDisplay();
                 await renderInvoices();
             } catch (e) {
                 show(invoicesMsg, "Erreur : " + e.message, "error");
