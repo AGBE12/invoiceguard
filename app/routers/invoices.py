@@ -103,6 +103,9 @@ def create_invoice(
         client_id=payload.client_id,
         user_id=current_user.id,
         amount=payload.amount,
+        description=payload.description,
+        quantity=payload.quantity,
+        unit_price=payload.unit_price,
         status=payload.status.value,
         due_date=payload.due_date,
     )
@@ -161,6 +164,9 @@ def download_invoice(
     invoice_data: dict = {
         "invoice_number": invoice.invoice_number,
         "amount": invoice.amount,
+        "description": invoice.description,
+        "quantity": invoice.quantity,
+        "unit_price": invoice.unit_price,
         "created_at": invoice.created_at,
         "due_date": invoice.due_date,
         "status": invoice.status,

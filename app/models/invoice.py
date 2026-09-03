@@ -9,6 +9,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     String,
     func,
@@ -52,12 +53,18 @@ class Invoice(Base):
         Numeric(12, 2), nullable=False
     )
 
+    # Détails d'opération (nouveau template PDF ouest-africain).
+    description: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )
+    quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    unit_price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=True)
+
     status: Mapped[InvoiceStatus] = mapped_column(
         String(20), default=InvoiceStatus.DRAFT, nullable=False
     )
 
     due_date: Mapped[date] = mapped_column(Date, nullable=True)
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -77,3 +84,4 @@ class Invoice(Base):
             f"<Invoice id={self.id} invoice_number={self.invoice_number!r} "
             f"client_id={self.client_id} status={self.status.value}>"
         )
+

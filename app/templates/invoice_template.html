@@ -230,9 +230,9 @@
             </thead>
             <tbody>
                 <tr>
-                    <td>Prestation facturée</td>
-                    <td>1</td>
-                    <td class="amount-num">{{ invoice.amount | fcfa }}</td>
+                    <td>{{ invoice.description }}</td>
+                    <td>{{ invoice.quantity }}</td>
+                    <td class="amount-num">{{ invoice.unit_price | fcfa }}</td>
                     <td class="amount-num">{{ invoice.amount | fcfa }}</td>
                 </tr>
                 <tr class="total-row">

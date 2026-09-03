@@ -2,26 +2,53 @@
 
 from __future__ import annotations
 
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, engine
+from app.migrations import run_migrations
 
-# Import des modèles afin qu'ils soient enregistrés auprès de Base.metadata
-# avant l'appel à Base.metadata.create_all().
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Cycle de vie de l'application (lifespan)
+# ---------------------------------------------------------------------------
+# Au démarrage du serveur on :
+#   1. Crée les tables manquantes (Base.metadata.create_all) — utile pour une
+#      base vierge (locale ou déployée la première fois).
+#   2. Exécute la migration « glissante » qui ajoute les colonnes nouvelles
+#      (description / quantity / unit_price) à la table invoices existante.
+# L'import d'un modèle SQLAlchemy est nécessaire pour enregistrer les tables
+# dans Base.metadata avant l'appel à create_all().
 from app import models  # noqa: F401  (imports invoice, client, user)
 
-# --- Création automatique des tables SQLite au démarrage ---
-# Crée les tables définies par les modèles (users, clients, invoices)
-# dans le fichier local invoiceguard.db si elles n'existent pas encore.
-Base.metadata.create_all(bind=engine)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- Initialisation du schéma avant de servir les requêtes ---
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Tables de base créées / vérifiées.")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Création des tables en échec (%s).", exc)
+
+    # --- Migration des colonnes ajoutées sur la table invoices ---
+    run_migrations(engine)
+
+    yield
+    # (aucun nettoyage particulier nécessaire côté moteur à l'arrêt)
+
 
 # --- Initialisation de l'application FastAPI ---
 app = FastAPI(
     title="InvoiceGuard API",
     description="API de gestion de facturation pour indépendants.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # --- Configuration CORS (accès depuis un frontend au navigateur) ---
@@ -66,7 +93,5 @@ try:
 
     stripe_service.configure_stripe()
 except RuntimeError as exc:
-    import logging
-
     logging.getLogger(__name__).warning("Stripe non configuré : %s", exc)
 

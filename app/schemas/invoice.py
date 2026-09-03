@@ -28,6 +28,15 @@ class InvoiceCreate(BaseModel):
     # Optionnel : si absent, le numéro est généré automatiquement.
     invoice_number: str | None = Field(default=None, max_length=20)
 
+    # Détails d'opération (nouveau template PDF ouest-africain).
+    # Facultatifs pour préserver la compatibilité avec les anciens
+    # appels où seul `amount` était fourni. `amount` reste le total.
+    description: str | None = Field(default=None, max_length=500)
+    quantity: int = Field(default=1, ge=1)
+    unit_price: Decimal | None = Field(
+        default=None, ge=0, max_digits=12, decimal_places=2
+    )
+
 
 class InvoiceUpdate(BaseModel):
     """Champs modifiables lors de la mise à jour d'une facture (tous optionnels)."""
@@ -37,6 +46,11 @@ class InvoiceUpdate(BaseModel):
     due_date: date | None = None
     status: InvoiceStatus | None = None
     invoice_number: str | None = Field(default=None, max_length=20)
+
+    # Détails d'opération modifiables.
+    description: str | None = Field(default=None, max_length=500)
+    quantity: int | None = Field(default=None, ge=1)
+    unit_price: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
 
 
 class InvoiceOut(BaseModel):
@@ -50,5 +64,9 @@ class InvoiceOut(BaseModel):
     amount: Decimal
     status: str
     due_date: date | None
+    description: str | None = None
+    quantity: int = 1
+    unit_price: Decimal | None = None
     created_at: datetime
     updated_at: datetime
+

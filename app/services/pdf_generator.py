@@ -133,6 +133,24 @@ def _build_context(invoice_data: dict) -> dict:
     amount = invoice.get("amount", 0)
     invoice["amount"] = _to_float(amount)
 
+    # --- Détails d'opération (nouveau template PDF ouest-africain) ---
+    # Normalise description / quantité / prix unitaire pour le template HTML,
+    # afin qu'ils restent utilisables même si une valeur est absente.
+    description = invoice.get("description")
+    invoice["description"] = (
+        description if description is not None else "Prestation facturée"
+    )
+    try:
+        qty = int(invoice.get("quantity") or 1)
+    except (TypeError, ValueError):
+        qty = 1
+    invoice["quantity"] = qty if qty >= 1 else 1
+
+    unit_price = invoice.get("unit_price")
+    invoice["unit_price"] = (
+        _to_float(unit_price) if unit_price is not None else invoice["amount"]
+    )
+
     # --- Statut ---
     status = invoice.get("status", "")
     if hasattr(status, "value"):  # Enum (InvoiceStatus)
@@ -386,22 +404,34 @@ def _generate_pdf_reportlab(context: dict) -> bytes:
     story.append(parties)
 
     # ---- Table des montants (en FCFA) ----
+    description = invoice.get("description") or "Prestation facturée"
+    quantity = invoice.get("quantity") or 1
+    unit_price = invoice.get("unit_price", amount)
+    if unit_price is None:
+        unit_price = amount
+    unit_price_fcfa = format_fcfa(unit_price)
     amount_fcfa = format_fcfa(amount)
+    subtotal_fcfa = format_fcfa(quantity * (_to_float(unit_price) or 0))
     data = [
-        ["Désignation", "Prix HT"],
-        ["Prestation facturée", amount_fcfa],
-        ["Total HT", amount_fcfa],
+        ["Désignation", "Qté", "Prix unitaire", "Montant HT"],
+        [_esc(description), str(quantity), unit_price_fcfa, subtotal_fcfa],
+        ["Total HT", "", "", amount_fcfa],
     ]
-    amounts_table = Table(data, colWidths=[130 * mm, 45 * mm])
+    amounts_table = Table(
+        data,
+        colWidths=[80 * mm, 15 * mm, 35 * mm, 40 * mm],
+    )
     amounts_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f1f1")),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
         ("GRID", (0, 0), (-1, -2), 0.4, colors.HexColor("#e0e0e0")),
         ("LINEBELOW", (0, 0), (-1, 0), 0.6, colors.HexColor("#e0e0e0")),
         ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
         ("FONTSIZE", (0, -1), (-1, -1), 14),
+        ("SPAN", (0, -1), (-2, -1)),
+        ("ALIGN", (0, -1), (-2, -1), "LEFT"),
     ]))
     story.append(Spacer(1, 14))
     story.append(amounts_table)
