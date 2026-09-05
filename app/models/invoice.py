@@ -1,4 +1,8 @@
-"""Module de modèle SQLAlchemy pour les factures InvoiceGuard."""
+"""Modèles SQLAlchemy des factures InvoiceGuard (multi-lignes).
+
+Une facture (``Invoice``) possède plusieurs lignes d'opération (``items``),
+stockées dans la table normale ``invoice_items`` via une relation One-to-Many.
+"""
 
 from __future__ import annotations
 
@@ -49,22 +53,15 @@ class Invoice(Base):
         index=True,
     )
 
-    amount: Mapped[float] = mapped_column(
-        Numeric(12, 2), nullable=False
-    )
-
-    # Détails d'opération (nouveau template PDF ouest-africain).
-    description: Mapped[str | None] = mapped_column(
-        String(500), nullable=True
-    )
-    quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    unit_price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=True)
+    # Montant TOTAL de la facture = somme des lignes (items).
+    amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
 
     status: Mapped[InvoiceStatus] = mapped_column(
         String(20), default=InvoiceStatus.DRAFT, nullable=False
     )
 
     due_date: Mapped[date] = mapped_column(Date, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -73,6 +70,14 @@ class Invoice(Base):
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+    )
+
+    # Lignes d'opération (One-to-Many, supprimées en cascade avec la facture).
+    items: Mapped[list["InvoiceItem"]] = relationship(
+        back_populates="invoice",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="InvoiceItem.id",
     )
 
     # Relations (à adapter selon vos modèles déjà définis)
@@ -85,3 +90,26 @@ class Invoice(Base):
             f"client_id={self.client_id} status={self.status.value}>"
         )
 
+
+class InvoiceItem(Base):
+    """Modèle de la table `invoice_items` (une ligne d'opération)."""
+
+    __tablename__ = "invoice_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    invoice_id: Mapped[int] = mapped_column(
+        ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    unit_price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+
+    invoice: Mapped["Invoice"] = relationship(back_populates="items")
+
+    def __repr__(self) -> str:
+        return (
+            f"<InvoiceItem id={self.id} qty={self.quantity} "
+            f"unit={self.unit_price} desc={self.description!r}>"
+        )

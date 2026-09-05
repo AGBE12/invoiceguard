@@ -113,9 +113,20 @@ async def send_invoice_email_route(
         )
 
     # --- Préparation des données pour le PDF ---
+    # Lignes d'opération (multi-lignes) normalisées pour le rendu PDF.
+    items = [
+        {
+            "description": it.description,
+            "quantity": it.quantity,
+            "unit_price": it.unit_price,
+        }
+        for it in invoice.items
+    ]
+
     invoice_data: dict = {
         "invoice_number": invoice.invoice_number,
         "amount": invoice.amount,
+        "items": items,
         "created_at": invoice.created_at,
         "due_date": invoice.due_date,
         "status": invoice.status,

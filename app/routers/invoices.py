@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.dependencies import get_current_user
 from app.database import get_db
 from app.models.client import Client
-from app.models.invoice import Invoice, InvoiceStatus
+from app.models.invoice import Invoice, InvoiceItem, InvoiceStatus
 from app.models.user import User
 from app.schemas.invoice import InvoiceCreate, InvoiceOut, InvoiceUpdate
 from app.services.pdf_generator import PDFGenerationError, generate_invoice_pdf
@@ -37,12 +38,13 @@ def _generate_invoice_number(db: Session) -> str:
 
 
 def _get_own_invoice(invoice_id: int, user_id: int, db: Session) -> Invoice:
-    """Récupère une facture appartenant à l'utilisateur, sinon lève une 404."""
-    invoice = (
-        db.query(Invoice)
-        .filter(Invoice.id == invoice_id, Invoice.user_id == user_id)
-        .first()
+    """Récupère une facture (et ses lignes) appartenant à l'utilisateur."""
+    stmt = (
+        select(Invoice)
+        .options(selectinload(Invoice.items))
+        .where(Invoice.id == invoice_id, Invoice.user_id == user_id)
     )
+    invoice = db.execute(stmt).scalar_one_or_none()
     if invoice is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -52,10 +54,7 @@ def _get_own_invoice(invoice_id: int, user_id: int, db: Session) -> Invoice:
 
 
 def _validate_client_ownership(client_id: int, user_id: int, db: Session) -> None:
-    """Vérifie que le client_id appartient à l'utilisateur, sinon lève une 400.
-
-    Empêche notamment de créer une facture pour un client appartenant à un tiers.
-    """
+    """Vérifie que le client_id appartient à l'utilisateur, sinon lève une 400."""
     owns_client = (
         db.query(Client.id)
         .filter(Client.id == client_id, Client.user_id == user_id)
@@ -68,47 +67,70 @@ def _validate_client_ownership(client_id: int, user_id: int, db: Session) -> Non
         )
 
 
+def _compute_total(items) -> Decimal:
+    """Calcule le montant total de la facture (somme des lignes)."""
+    total = Decimal("0")
+    for it in items:
+        total += Decimal(it.quantity) * Decimal(it.unit_price)
+    return total
+
+
 @router.get("", response_model=list[InvoiceOut], summary="Liste mes factures")
 def list_invoices(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[Invoice]:
-    """Renvoie toutes les factures de l'utilisateur connecté."""
-    return (
-        db.query(Invoice)
-        .filter(Invoice.user_id == current_user.id)
+    """Renvoie toutes les factures (avec leurs lignes) de l'utilisateur."""
+    stmt = (
+        select(Invoice)
+        .options(selectinload(Invoice.items))
+        .where(Invoice.user_id == current_user.id)
         .order_by(Invoice.created_at.desc())
-        .all()
     )
+    return list(db.execute(stmt).scalars().all())
 
 
 @router.post(
     "",
     response_model=InvoiceOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Créer une facture",
+    summary="Créer une facture multi-lignes",
 )
 def create_invoice(
     payload: InvoiceCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Invoice:
-    """Crée une facture en vérifiant que le client appartient à l'utilisateur."""
+    """Crée une facture à partir de ses lignes d'opération."""
     _validate_client_ownership(payload.client_id, current_user.id, db)
 
+    if not payload.items:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Au moins une ligne d'opération (item) est requise.",
+        )
+
     invoice_number = payload.invoice_number or _generate_invoice_number(db)
+    total = _compute_total(payload.items)
 
     new_invoice = Invoice(
         invoice_number=invoice_number,
         client_id=payload.client_id,
         user_id=current_user.id,
-        amount=payload.amount,
-        description=payload.description,
-        quantity=payload.quantity,
-        unit_price=payload.unit_price,
+        amount=total,
         status=payload.status.value,
         due_date=payload.due_date,
     )
+    # Renseigne les lignes d'opération (persistées en cascade par la relation).
+    new_invoice.items = [
+        InvoiceItem(
+            description=item.description,
+            quantity=item.quantity,
+            unit_price=item.unit_price,
+        )
+        for item in payload.items
+    ]
+
     db.add(new_invoice)
     db.commit()
     db.refresh(new_invoice)
@@ -121,7 +143,7 @@ def get_invoice(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Invoice:
-    """Renvoie une facture précise, si elle appartient à l'utilisateur."""
+    """Renvoie une facture précise (avec ses lignes), si elle appartient à l'utilisateur."""
     return _get_own_invoice(invoice_id, current_user.id, db)
 
 
@@ -142,31 +164,29 @@ def download_invoice(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
-    """Génère et renvoie le PDF d'une facture appartenant à l'utilisateur.
-
-    - Vérifie que l'utilisateur connecté est bien le propriétaire (404 sinon).
-    - Récupère la facture et son client associé.
-    - Formate les données puis appelle ``generate_invoice_pdf``.
-    - Renvoie le PDF en flux binaire (application/pdf) avec un nom téléchargeable.
-    """
-    # Vérification de propriété : lève un 404 si la facture n'appartient pas
-    # à l'utilisateur connecté (ou si elle n'existe pas).
+    """Génère et renvoie le PDF d'une facture appartenant à l'utilisateur."""
     invoice = _get_own_invoice(invoice_id, current_user.id, db)
 
-    # Données du client associé (garanties dès la création par la vérification).
     client = (
         db.query(Client)
         .filter(Client.id == invoice.client_id, Client.user_id == current_user.id)
         .first()
     )
 
-    # Données du freelance = utilisateur connecté (émetteur de la facture).
+    # Lignes d'opération normalisées pour le rendu PDF (WeasyPrint ou reportlab).
+    items = [
+        {
+            "description": it.description,
+            "quantity": it.quantity,
+            "unit_price": it.unit_price,
+        }
+        for it in invoice.items
+    ]
+
     invoice_data: dict = {
         "invoice_number": invoice.invoice_number,
         "amount": invoice.amount,
-        "description": invoice.description,
-        "quantity": invoice.quantity,
-        "unit_price": invoice.unit_price,
+        "items": items,
         "created_at": invoice.created_at,
         "due_date": invoice.due_date,
         "status": invoice.status,
@@ -180,8 +200,8 @@ def download_invoice(
             "full_name": current_user.full_name,
             "company_name": current_user.company_name,
             "email": current_user.email,
-            # L'utilisateur ne porte pas de phone/address en base ; on les
-            # laisse vides si le template les affiche conditionnellement.
+            # L'utilisateur ne porte pas de phone/address en base ; on les laisse
+            # vides, le bloc signature en affichera seulement ce qui est connu.
             "phone": None,
             "address": None,
         },
@@ -195,9 +215,9 @@ def download_invoice(
             detail=str(exc),
         ) from exc
 
-    # Nom de fichier sécurisé, basé sur le numéro de facture (ASCII).
     safe_number = "".join(
-        ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in invoice.invoice_number
+        ch if ch.isalnum() or ch in ("-", "_") else "_"
+        for ch in invoice.invoice_number
     )
     filename = f"facture_{safe_number}.pdf"
 
@@ -223,13 +243,29 @@ def update_invoice(
     # Si un nouveau client_id est fourni, vérifie qu'il appartient à l'utilisateur.
     if "client_id" in update_data:
         _validate_client_ownership(update_data["client_id"], current_user.id, db)
+        invoice.client_id = update_data["client_id"]
 
-    # Le statut est une enum : on stocke sa valeur en chaîne.
     if "status" in update_data and update_data["status"] is not None:
-        update_data["status"] = update_data["status"].value
+        invoice.status = update_data["status"].value
 
-    for field, value in update_data.items():
-        setattr(invoice, field, value)
+    if "due_date" in update_data:
+        invoice.due_date = update_data["due_date"]
+
+    if "invoice_number" in update_data:
+        invoice.invoice_number = update_data["invoice_number"]
+
+    # Remplacement complet des lignes si une nouvelle liste est fournie.
+    if "items" in update_data and update_data["items"] is not None:
+        invoice.items.clear()
+        invoice.items = [
+            InvoiceItem(
+                description=item.description,
+                quantity=item.quantity,
+                unit_price=item.unit_price,
+            )
+            for item in update_data["items"]
+        ]
+        invoice.amount = _compute_total(update_data["items"])
 
     db.commit()
     db.refresh(invoice)
@@ -242,12 +278,7 @@ def pay_invoice(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Invoice:
-    """Marque une facture comme payée, si elle appartient à l'utilisateur connecté.
-
-    - Vérifie la propriété via ``_get_own_invoice`` (404 sinon).
-    - Assigne ``InvoiceStatus.PAID`` au statut de la facture.
-    - Persiste en base et renvoie la facture fraîchement mise à jour.
-    """
+    """Marque une facture comme payée, si elle appartient à l'utilisateur connecté."""
     invoice = _get_own_invoice(invoice_id, current_user.id, db)
     invoice.status = InvoiceStatus.PAID.value
     db.commit()

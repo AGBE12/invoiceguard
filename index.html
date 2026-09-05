@@ -145,6 +145,35 @@
         .pill.paid { background: #eafaf1; color: var(--success); }
         .pill.overdue { background: #fdf2f2; color: var(--danger); }
 
+        /* --- Lignes d'opération dynamiques + résumé terracotta --- */
+        .inv-summary {
+            margin: 8px 0 14px;
+            border: 3px solid #b75b0a;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #fff7eb, #ffe2bd);
+            padding: 18px 16px;
+            text-align: center;
+            box-shadow: 0 4px 14px rgba(183,91,10,0.18);
+        }
+        .inv-summary .sum-label {
+            font-size: 12px; letter-spacing: 3px; font-weight: 800;
+            text-transform: uppercase; color: #8f4707; margin-bottom: 6px;
+        }
+        .inv-summary .sum-amount {
+            font-size: 40px; font-weight: 800; color: #2c3e50;
+            line-height: 1.1; font-variant-numeric: tabular-nums;
+        }
+        .items-editor table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+        .items-editor th, .items-editor td {
+            padding: 6px; border-bottom: 1px solid #eee; text-align: left;
+        }
+        .items-editor th { color: #7f8c8d; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+        .items-editor input { width: 100%; min-width: 0; padding: 7px 8px; font-size: 13px; }
+        .items-editor .line-total { text-align: right; font-weight: 700; color: #2c3e50; white-space: nowrap; }
+        .items-editor button.remove-line {
+            background: none; border: none; color: #c0392b;
+            font-size: 16px; cursor: pointer; padding: 2px 8px; line-height: 1;
+        }
         .empty { color: var(--muted); font-size: 14px; padding: 10px 0; }
 
         footer { max-width: 960px; margin: 24px auto 0; text-align: center; font-size: 12px; color: var(--muted); }
@@ -237,30 +266,37 @@
             <div class="card-body">
                 <div class="form-group">
                     <h3 style="font-size:14px; margin-bottom:10px;">Créer une facture <small style="color:var(--muted)">POST /invoices</small></h3>
-                    <div class="row">
+                    <div class="form-group">
+                        <label for="invClientId">Client *</label>
                         <select id="invClientId"></select>
                     </div>
-                    <div class="row" style="margin-top:10px; align-items:flex-end;">
-                        <div class="form-group" style="flex:2; margin-bottom:0;">
-                            <label for="invDescription">Désignation</label>
-                            <input type="text" id="invDescription" placeholder="Ex: Prestation de développement">
-                        </div>
-                        <div class="form-group" style="flex:1; margin-bottom:0;">
-                            <label for="invQuantity">Quantité</label>
-                            <input type="number" id="invQuantity" value="1" min="1">
-                        </div>
-                        <div class="form-group" style="flex:2; margin-bottom:0;">
-                            <label for="invUnitPrice">Prix Unitaire (FCFA)</label>
-                            <input type="number" id="invUnitPrice" placeholder="Ex: 50000" min="0">
-                        </div>
+                    <div class="inv-summary">
+                        <div class="sum-label">Résumé / Summary</div>
+                        <div class="sum-amount" id="invGrandTotal">0 FCFA</div>
                     </div>
-                    <div class="form-group" style="margin-top:10px; font-size:13px; color:var(--muted);">
-                        <span id="invTotalDisplay">Montant Total Calculé : 0 FCFA</span>
+                    <div class="form-group" style="margin-bottom:4px;">
+                        <label>Lignes d'opération</label>
+                        <div class="items-editor">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th style="width:44%;">Désignation</th>
+                                        <th style="width:12%;">Quantité</th>
+                                        <th style="width:20%;">Prix unitaire (FCFA)</th>
+                                        <th style="width:20%;">Montant HT</th>
+                                        <th style="width:4%;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="itemsBody"></tbody>
+                            </table>
+                        </div>
+                        <button type="button" id="addItemBtn" class="ghost small" style="margin-top:10px;">+ Ajouter une ligne</button>
                     </div>
-                    <div class="row" style="margin-top:10px;">
-                        <input type="date" id="invDueDate" style="flex:1;">
+                    <div class="form-group" style="margin-top:6px;">
+                        <label for="invDueDate">Date d'échéance (optionnel)</label>
+                        <input type="date" id="invDueDate" style="width:100%;">
                     </div>
-                    <button id="createInvoiceBtn" style="margin-top:10px;">Créer la facture</button>
+                    <button id="createInvoiceBtn" style="margin-top:6px;">Créer la facture</button>
                 </div>
                 <div id="invoicesMsg" class="msg"></div>
                 <div id="invoicesList" class="empty">Cliquez sur « Lister mes factures » pour afficher la liste.</div>
@@ -298,8 +334,8 @@
         const clientsMsg = $("clientsMsg"), clientsList = $("clientsList");
 
         const invClientId = $("invClientId"), invDueDate = $("invDueDate");
-        const invDescription = $("invDescription"), invQuantity = $("invQuantity"),
-              invUnitPrice = $("invUnitPrice"), invTotalDisplay = $("invTotalDisplay");
+        const invGrandTotal = $("invGrandTotal");
+        const itemsBody = $("itemsBody"), addItemBtn = $("addItemBtn");
         const invoicesMsg = $("invoicesMsg"), invoicesList = $("invoicesList");
 
         // ------------------------------------------------------------------
@@ -689,18 +725,66 @@
         }
 
         // ------------------------------------------------------------------
-        // Calcul automatique du montant total (Quantité x Prix Unitaire)
+        // Lignes d'opération dynamiques + calcul du total (temps réel)
         // ------------------------------------------------------------------
-        function updateTotalDisplay() {
-            const qty = Number(invQuantity.value) || 0;
-            const price = Number(invUnitPrice.value) || 0;
-            const total = qty * price;
-            invTotalDisplay.textContent = "Montant Total Calculé : " + formatAmount(total);
+        function emptyRowData() { return { description: "", quantity: "", unit_price: "" }; }
+
+        function rowAmount(row) {
+            const qty = Number(row.querySelector(".qty-in").value) || 0;
+            const price = Number(row.querySelector(".unit-in").value) || 0;
+            return qty * price;
         }
 
-        ["input", "change"].forEach((evt) => {
-            invQuantity.addEventListener(evt, updateTotalDisplay);
-            invUnitPrice.addEventListener(evt, updateTotalDisplay);
+        function recalcAll() {
+            let grand = 0;
+            itemsBody.querySelectorAll("tr.item-row").forEach((row) => {
+                const amt = rowAmount(row);
+                row.querySelector(".line-total").textContent = amt ? formatAmount(amt) : "0 FCFA";
+                grand += amt;
+            });
+            invGrandTotal.textContent = formatAmount(grand);
+            return grand;
+        }
+
+        function addInvoiceRow(data) {
+            const d = Object.assign(emptyRowData(), data || {});
+            const tr = document.createElement("tr");
+            tr.className = "item-row";
+            tr.innerHTML =
+                '<td><input class="desc-in" type="text" placeholder="Désignation" value="' + escapeHtml(d.description) + '"></td>' +
+                '<td><input class="qty-in" type="number" min="1" placeholder="1" value="' + escapeHtml(d.quantity) + '"></td>' +
+                '<td><input class="unit-in" type="number" min="0" placeholder="0" value="' + escapeHtml(d.unit_price) + '"></td>' +
+                '<td class="line-total">0 FCFA</td>' +
+                '<td><button type="button" class="remove-line" title="Supprimer cette ligne">✕</button></td>';
+            tr.querySelector(".remove-line").addEventListener("click", () => {
+                if (itemsBody.querySelectorAll("tr.item-row").length > 1) {
+                    tr.remove();
+                } else {
+                    tr.querySelector(".desc-in").value = "";
+                    tr.querySelector(".qty-in").value = "";
+                    tr.querySelector(".unit-in").value = "";
+                }
+                recalcAll();
+            });
+            itemsBody.appendChild(tr);
+            return tr;
+        }
+
+        // Recalcul en direct passé qu'une saisie a lieu sur une ligne.
+        itemsBody.addEventListener("input", recalcAll);
+
+        // Appuyer sur "Entrée" dans un champ ajoute une nouvelle ligne vierge.
+        itemsBody.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && e.target && e.target.tagName === "INPUT") {
+                e.preventDefault();
+                const row = addInvoiceRow();
+                row.querySelector(".desc-in").focus();
+            }
+        });
+
+        addItemBtn.addEventListener("click", () => {
+            const row = addInvoiceRow();
+            row.querySelector(".desc-in").focus();
         });
 
         $("listInvoicesBtn").addEventListener("click", async () => {
@@ -713,23 +797,33 @@
             show(invoicesMsg, "", "info");
             if (!getToken()) return show(invoicesMsg, "Connectez-vous d'abord.", "error");
             const clientId = invClientId.value;
-            const description = invDescription.value.trim();
-            const quantity = Number(invQuantity.value);
-            const unitPrice = Number(invUnitPrice.value);
-            const amount = quantity * unitPrice;
-
             if (!clientId) return show(invoicesMsg, "Sélectionnez un client.", "error");
-            if (!description) return show(invoicesMsg, "Saisissez une désignation pour la facture.", "error");
-            if (!quantity || quantity < 1) return show(invoicesMsg, "Saisissez une quantité valide (≥ 1).", "error");
-            if (!unitPrice || unitPrice < 0) return show(invoicesMsg, "Saisissez un prix unitaire valide.", "error");
-            if (amount <= 0) return show(invoicesMsg, "Saisissez un montant valide.", "error");
+
+            const rows = itemsBody.querySelectorAll("tr.item-row");
+            const items = [];
+            let invalid = null;
+
+            rows.forEach((row) => {
+                const description = row.querySelector(".desc-in").value.trim();
+                const quantity = Number(row.querySelector(".qty-in").value);
+                const unit_price = Number(row.querySelector(".unit-in").value);
+                // Ligne entièrement vide -> ignorée (utile pour la ligne vierge d'attente).
+                if (!description && !quantity && !unit_price) return;
+                if (!description) { if (!invalid) invalid = "Renseignez la désignation de chaque ligne."; return; }
+                if (!quantity || quantity < 1) { if (!invalid) invalid = "Saisissez une quantité valide (≥ 1)."; return; }
+                if (isNaN(unit_price) || unit_price < 0) { if (!invalid) invalid = "Saisissez un prix unitaire valide."; return; }
+                items.push({ description: description, quantity: quantity, unit_price: unit_price });
+            });
+
+            if (invalid) return show(invoicesMsg, invalid, "error");
+            if (items.length === 0) return show(invoicesMsg, "Ajoutez au moins une ligne d'opération.", "error");
+            const total = recalcAll();
+            if (total <= 0) return show(invoicesMsg, "Le montant total doit être supérieur à 0.", "error");
 
             const payload = {
                 client_id: Number(clientId),
-                description: description,
-                quantity: quantity,
-                unit_price: unitPrice,
-                amount: amount,
+                items: items,
+                amount: total,
                 status: "draft",
             };
             if (invDueDate.value) payload.due_date = invDueDate.value;
@@ -741,13 +835,18 @@
                     body: JSON.stringify(payload),
                 });
                 show(invoicesMsg, "✅ Facture « " + r.body.invoice_number + " » créée.", "success");
-                invDescription.value = ""; invQuantity.value = 1; invUnitPrice.value = "";
-                invDueDate.value = ""; updateTotalDisplay();
+                // Réinitialise le formulaire : une ligne vierge d'attente.
+                invDueDate.value = "";
+                itemsBody.innerHTML = "";
+                addInvoiceRow();
                 await renderInvoices();
             } catch (e) {
                 show(invoicesMsg, "Erreur : " + e.message, "error");
             }
         });
+
+        // Ligne d'attente initiale.
+        addInvoiceRow();
 
         // ------------------------------------------------------------------
         // Initialisation

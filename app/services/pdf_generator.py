@@ -1,14 +1,18 @@
 """Service de génération de PDF de factures pour InvoiceGuard.
 
-Convertit un modèle Jinja2 (``app/templates/invoice_template.html``)
-en PDF, en utilisant :
+Convertit un modèle Jinja2 (``app/templates/invoice_template.html``) en PDF,
+en utilisant :
 
-1. **WeasyPrint** (rendu fidèle du HTML + CSS) si disponible ;
-2. **reportlab** en secours (fallback plus léger, compatible macOS
-   Catalina) si WeasyPrint (ou ses dépendances système) fait défaut.
+1. **WeasyPrint** (rendu fidèle du HTML + CSS terracotta) si disponible ;
+2. **reportlab** en secours (fallback plus léger, compatible macOS Catalina)
+   si WeasyPrint (ou ses dépendances système) fait défaut.
 
-Le résultat est renvoyé sous forme d'un flux d'octets (``bytes``),
-prêt à être renvoyé par FastAPI (StreamingResponse / Response).
+Le résultat est renvoyé sous forme d'un flux d'octets (``bytes``), prêt à
+être renvoyé par FastAPI (StreamingResponse / Response).
+
+Design : thème terracotta / orange chaud (#b75b0a), immense bloc
+« RÉSUMÉ / SUMMARY » avec le total en très gros, tableau listant toutes les
+lignes d'opération, et bloc de signature de l'émetteur en bas.
 """
 
 from __future__ import annotations
@@ -29,16 +33,16 @@ class PDFGenerationError(Exception):
     """Levée lorsqu'une erreur explicite survient lors de la génération du PDF."""
 
 
+# Couleurs du thème terracotta (partagées avec le fallback reportlab).
+TERRA = "#b75b0a"
+TERRA_DARK = "#8f4707"
+TERRA_SOFT = "#fff7eb"
+
+
 def format_fcfa(amount) -> str:
     """Formate un montant en FCFA, sans décimales superflues.
 
     Ex. 50000 -> "50 000 FCFA"  (espace comme séparateur de milliers).
-
-    Args:
-        amount: nombre (Decimal / float / str) représentant un montant.
-
-    Returns:
-        Chaîne au format "<milliers espacés> FCFA".
     """
     value = _to_float(amount)
     integer = int(round(value))
@@ -47,11 +51,7 @@ def format_fcfa(amount) -> str:
 
 
 def _build_env() -> Environment:
-    """Retourne un environnement Jinja2 configuré sur le dossier des templates.
-
-    Enregistre le filtre ``fcfa`` afin de formater les montants directement
-    dans le modèle HTML (ex: ``{{ invoice.amount | fcfa }}``).
-    """
+    """Retourne un environnement Jinja2 configuré sur le dossier des templates."""
     if not TEMPLATES_DIR.is_dir():
         raise PDFGenerationError(
             f"Le dossier des templates '{TEMPLATES_DIR}' est introuvable."
@@ -62,25 +62,12 @@ def _build_env() -> Environment:
         trim_blocks=True,
         lstrip_blocks=True,
     )
-    # Filtre maison : formate un montant en "X XXXX FCFA".
     env.filters["fcfa"] = format_fcfa
     return env
 
 
 def render_invoice_html(invoice_data: dict) -> str:
-    """Injecte les données de la facture dans le modèle HTML.
-
-    Args:
-        invoice_data: dictionnaire structuré (``invoice``, ``client``,
-            infos freelance) — voir ``_build_context``.
-
-    Returns:
-        Le HTML final sous forme de chaîne.
-
-    Raises:
-        PDFGenerationError: si le template est introuvable ou si le
-            rendu Jinja2 échoue.
-    """
+    """Injecte les données de la facture dans le modèle HTML."""
     context = _build_context(invoice_data)
 
     try:
@@ -93,28 +80,24 @@ def render_invoice_html(invoice_data: dict) -> str:
         ) from exc
 
     try:
-        rendered = template.render(**context)
+        return template.render(**context)
     except Exception as exc:  # noqa: BLE001 - erreurs Jinja variées
         logger.exception("Échec du rendu HTML de la facture.")
         raise PDFGenerationError(
             f"Une erreur est survenue lors du rendu HTML de la facture : {exc}"
         ) from exc
 
-    return rendered
-
 
 def _build_context(invoice_data: dict) -> dict:
     """Normalise les données brutes en un contexte prêt pour le template.
 
-    Attend notamment (clés tolérantes) :
+    La donnée attendue contient notamment :
         - ``invoice_number`` / ``number``
-        - ``amount``
-        - ``created_at`` / ``issue_date``
-        - ``due_date``
-        - ``status``
-        - ``client`` (objet ou dict : ``name``, ``email``, ...)
-        - ``freelance`` / ``user`` (objet ou dict) + champs ``full_name``,
-          ``company_name``, ``email``, ``phone``, ``address``
+        - ``amount``  (total général de la facture)
+        - ``items``   (liste de lignes : description / quantity / unit_price)
+        - ``created_at`` / ``issue_date`` / ``due_date`` / ``status``
+        - ``client`` (objet ou dict : name, email, phone, address)
+        - ``freelance`` / ``user`` (+ full_name, company_name, email, address)
     """
     invoice = dict(invoice_data)
 
@@ -129,27 +112,45 @@ def _build_context(invoice_data: dict) -> dict:
     )
     invoice.setdefault("due_date", invoice.get("due_date") or "")
 
-    # --- Montant ---
+    # --- Montant total ---
     amount = invoice.get("amount", 0)
     invoice["amount"] = _to_float(amount)
 
-    # --- Détails d'opération (nouveau template PDF ouest-africain) ---
-    # Normalise description / quantité / prix unitaire pour le template HTML,
-    # afin qu'ils restent utilisables même si une valeur est absente.
-    description = invoice.get("description")
-    invoice["description"] = (
-        description if description is not None else "Prestation facturée"
-    )
-    try:
-        qty = int(invoice.get("quantity") or 1)
-    except (TypeError, ValueError):
-        qty = 1
-    invoice["quantity"] = qty if qty >= 1 else 1
+    # --- Lignes d'opération (multi-lignes) ---
+    # Chaque ligne est normalisée : description, quantité, prix unitaire et
+    # montant HT (quantité x prix unitaire) calculé.
+    raw_items = invoice.get("items") or []
+    items: list[dict] = []
+    for raw in raw_items:
+        if isinstance(raw, dict):
+            item = dict(raw)
+        else:  # objet SQLAlchemy
+            item = {
+                key: val
+                for key, val in raw.__dict__.items()
+                if not key.startswith("_")
+            }
+        desc = item.get("description")
+        item["description"] = desc if desc is not None else "Prestation facturée"
+        qty = int(item.get("quantity") or 1)
+        item["quantity"] = qty if qty >= 1 else 1
+        unit_price = item.get("unit_price")
+        unit_price_f = _to_float(unit_price) if unit_price is not None else 0.0
+        item["unit_price"] = unit_price_f
+        item["amount"] = _to_float(item["quantity"]) * unit_price_f
+        items.append(item)
 
-    unit_price = invoice.get("unit_price")
-    invoice["unit_price"] = (
-        _to_float(unit_price) if unit_price is not None else invoice["amount"]
-    )
+    # À défaut (anciennes factures sans lignes), on génère une ligne de secours.
+    if not items:
+        items = [
+            {
+                "description": "Prestation facturée",
+                "quantity": 1,
+                "unit_price": invoice["amount"],
+                "amount": invoice["amount"],
+            }
+        ]
+    invoice["line_items"] = items
 
     # --- Statut ---
     status = invoice.get("status", "")
@@ -159,14 +160,11 @@ def _build_context(invoice_data: dict) -> dict:
 
     # --- Client ---
     client = invoice.get("client") or {}
-    client_dict = _extract_entity(client)
-    invoice["client"] = client_dict
+    invoice["client"] = _extract_entity(client)
 
-    # --- Infos freelance ---
+    # --- Infos freelance / émetteur (bloc signature) ---
     freelance = invoice.get("freelance") or invoice.get("user") or {}
     freelance_dict = _extract_entity(freelance)
-
-    # Alias utilisés par le template pour le bloc "De".
     invoice["freelance_name"] = (
         freelance_dict.get("full_name")
         or freelance_dict.get("name")
@@ -174,10 +172,9 @@ def _build_context(invoice_data: dict) -> dict:
     )
     invoice["freelance_company"] = freelance_dict.get("company_name")
     invoice["freelance_email"] = freelance_dict.get("email", "")
-    invoice["freelance_phone"] = freelance_dict.get("phone")
     invoice["freelance_address"] = freelance_dict.get("address")
 
-    # Pour le bloc brand (nom affiché en haut à gauche).
+    # Nom de marque affiché en haut à gauche.
     invoice.setdefault("company_name", invoice["freelance_company"])
 
     return {"invoice": invoice}
@@ -196,7 +193,6 @@ def _extract_entity(entity) -> dict:
     else:
         data = {}
 
-    # Normalise les valeurs manquantes et les Enum.
     for key in ("email", "phone", "address", "company_name", "full_name", "name"):
         val = data.get(key)
         if hasattr(val, "value"):
@@ -222,32 +218,17 @@ def generate_invoice_pdf(invoice_data: dict) -> bytes:
     """Génère le PDF d'une facture et le retourne sous forme d'octets.
 
     Utilise **WeasyPrint** en priorité, puis **reportlab** en secours.
-
-    Args:
-        invoice_data: dictionnaire des données de la facture (voir
-            ``_build_context`` pour les clés acceptées).
-
-    Returns:
-        ``bytes`` contenant le PDF généré.
-
-    Raises:
-        PDFGenerationError: si le template est introuvable ou si la
-            compilation du PDF échoue (avec un message explicite).
     """
     context = _build_context(invoice_data)
     html = render_invoice_html(invoice_data)
 
-    # Étape 1 : essais de WeasyPrint (résultat mis en cache : l'import
-    # peut être très lent quand les bibliothèques système font défaut).
     if _weasyprint_available():
         try:
             from weasyprint import HTML  # import différé, coûteux
-
             return HTML(string=html, base_url=str(TEMPLATES_DIR)).write_pdf()
         except Exception as exc:  # noqa: BLE001
             logger.debug("WeasyPrint a échoué à la compilation (%s).", exc)
 
-    # Étape 2 : secours reportlab (compatible macOS Catalina).
     try:
         return _generate_pdf_reportlab(context)
     except Exception as exc:  # noqa: BLE001
@@ -261,13 +242,7 @@ _WEASYPRINT_OK: bool | None = None
 
 
 def _weasyprint_available() -> bool:
-    """Retourne True si WeasyPrint est utilisable, en mettant le résultat en cache.
-
-    L'import de WeasyPrint tente de charger plusieurs bibliothèques système
-    (libgobject, pango, ...) et peut prendre plusieurs dizaines de secondes
-    (voire échouer) quand elles sont absentes. On ne fait donc ce test
-    qu'une seule fois par processus.
-    """
+    """Retourne True si WeasyPrint est utilisable (résultat mis en cache)."""
     global _WEASYPRINT_OK
     if _WEASYPRINT_OK is None:
         try:
@@ -280,20 +255,15 @@ def _weasyprint_available() -> bool:
 
 
 def _generate_pdf_reportlab(context: dict) -> bytes:
-    """Fallback reportlab : reconstruit une facture structurée en mémoire.
+    """Fallback reportlab : facture terracotta structurée.
 
-    Le HTML/CSS ne peut pas être rendu fidèlement par reportlab ; on
-    reconstruit donc une mise en page simple et lisible directement à
-    partir du contexte normalisé (produit par ``_build_context``).
-
-    Args:
-        context: contexte normalisé ``{"invoice": {...}}``.
-
-    Returns:
-        ``bytes`` contenant le PDF généré.
+    Reproduit, sans CSS, la mise en page demandée côté métier :
+    émetteur -> résumé en très gros -> tableau des lignes -> bloc signature.
     """
     from io import BytesIO
 
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import mm
@@ -304,148 +274,199 @@ def _generate_pdf_reportlab(context: dict) -> bytes:
         Table,
         TableStyle,
     )
-    from reportlab.lib import colors
-    from reportlab.lib.enums import TA_RIGHT
 
     invoice = context.get("invoice", {})
     client = invoice.get("client", {})
-    amount = invoice.get("amount", 0.0)
+    amount = invoice["amount"]
+    items = invoice.get("line_items", [])
+
+    terra = colors.HexColor(TERRA)
+    terra_dark = colors.HexColor(TERRA_DARK)
+    terra_soft = colors.HexColor(TERRA_SOFT)
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        leftMargin=18 * mm,
-        rightMargin=18 * mm,
-        topMargin=18 * mm,
-        bottomMargin=18 * mm,
+        leftMargin=16 * mm,
+        rightMargin=16 * mm,
+        topMargin=16 * mm,
+        bottomMargin=16 * mm,
+        title="Facture %s" % invoice.get("number", ""),
     )
 
-    styles = getSampleStyleSheet()
+    base = getSampleStyleSheet()
+    brand_style = ParagraphStyle(
+        "Brand", parent=base["Heading1"], fontSize=24, leading=28,
+        textColor=terra, spaceAfter=0,
+    )
     title_style = ParagraphStyle(
         "Title", fontName="Helvetica-Bold", fontSize=20, leading=24,
-        spaceAfter=6, textColor=colors.HexColor("#2980b9"),
-    )
-    brand_style = ParagraphStyle(
-        "Brand", parent=styles["Heading1"], fontSize=22, leading=26,
-        textColor=colors.HexColor("#2980b9"), spaceAfter=2,
+        alignment=TA_RIGHT, textColor=colors.white, backColor=terra,
+        borderPadding=(6, 14, 6, 14), spaceAfter=8,
     )
     subtitle_style = ParagraphStyle(
-        "Subtitle", fontName="Helvetica", fontSize=9, leading=12,
-        textColor=colors.HexColor("#7f8c8d"),
+        "Subtitle", fontName="Helvetica", fontSize=10, leading=14,
+        alignment=TA_RIGHT, textColor=colors.HexColor("#7f8c8d"),
     )
     body_style = ParagraphStyle(
         "Body", fontName="Helvetica", fontSize=10, leading=14,
     )
-    strong_style = ParagraphStyle(
-        "Strong", parent=body_style, fontName="Helvetica-Bold",
+    party_title = ParagraphStyle(
+        "PartyTitle", fontName="Helvetica-Bold", fontSize=11, leading=14,
+        textColor=terra, spaceAfter=6,
     )
-    section_style = ParagraphStyle(
-        "Section", fontName="Helvetica-Bold", fontSize=11, leading=14,
-        spaceBefore=14, spaceAfter=6, textColor=colors.HexColor("#34495e"),
+    summary_label = ParagraphStyle(
+        "SumLabel", fontName="Helvetica-Bold", fontSize=15, leading=18,
+        alignment=TA_CENTER, textColor=terra,
+    )
+    summary_amount = ParagraphStyle(
+        "SumAmount", fontName="Helvetica-Bold", fontSize=34, leading=40,
+        alignment=TA_CENTER, textColor=colors.HexColor("#2c3e50"),
+    )
+    summary_due = ParagraphStyle(
+        "SumDue", fontName="Helvetica", fontSize=11, leading=15,
+        alignment=TA_CENTER, textColor=colors.HexColor("#8f4707"),
+    )
+    sig_style = ParagraphStyle(
+        "Sig", parent=body_style, spaceBefore=4,
     )
 
     story = []
 
-    # ---- En-tête : marque + titre facture ----
-    header_left = [
-        Paragraph(
-            "<b>%s</b>" % (invoice.get("company_name") or invoice.get("freelance_name") or "Facture"),
-            brand_style,
-        ),
-    ]
-    email = invoice.get("freelance_email")
-    if email:
-        header_left.append(Paragraph(_esc(email), subtitle_style))
-    phone = invoice.get("freelance_phone")
-    if phone:
-        header_left.append(Paragraph(_esc(phone), subtitle_style))
-
-    header_right = [
-        Paragraph("FACTURE", title_style),
-        Paragraph(f"<b>{_esc(invoice.get('number') or '')}</b>", body_style),
-        Paragraph(f"Émission : {_esc(invoice.get('issue_date') or '—')}", subtitle_style),
-    ]
-    if invoice.get("due_date"):
-        header_right.append(Paragraph(f"Échéance : {_esc(invoice['due_date'])}", subtitle_style))
-
+    # ---- En-tête : brand + titre ----
+    brand_name = invoice.get("company_name") or invoice.get("freelance_name")         or "Entreprise"
     header = Table(
-        [[header_left, header_right]],
-        colWidths=[90 * mm, 85 * mm],
+        [[
+            [Paragraph("<b>%s</b>" % _esc(brand_name), brand_style)],
+            [Paragraph("FACTURE", title_style)],
+        ]],
+        colWidths=[100 * mm, 75 * mm],
     )
     header.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+        ("LINEBELOW", (0, 0), (-1, -1), 2, terra),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
     ]))
     story.append(header)
-    story.append(Spacer(1, 14))
 
-    # ---- Blocs « Facturé à » / « De » ----
-    client_block = [
-        Paragraph("Facturé à", section_style),
-        Paragraph(f"<b>{_esc(client.get('name') or '—')}</b>", body_style),
-    ]
+    # Numéro + dates (aligné à droite)
+    meta_lines = [f"<b>{_esc(invoice.get('number') or '')}</b>",
+                  "Émission : %s" % _esc(invoice.get("issue_date") or "—")]
+    if invoice.get("due_date"):
+        meta_lines.append("Échéance : %s" % _esc(invoice["due_date"]))
+    for ln in meta_lines:
+        story.append(Paragraph(ln, subtitle_style))
+    story.append(Spacer(1, 10))
+
+    # ---- Facturé à ----
+    client_lines = [Paragraph("FACTURÉ À", party_title),
+                    Paragraph("<b>%s</b>" % _esc(client.get("name") or "—"), body_style)]
     for key in ("email", "phone", "address"):
         val = client.get(key)
         if val:
-            client_block.append(Paragraph(_esc(val), body_style))
-
-    freelance_block = [
-        Paragraph("De", section_style),
-        Paragraph(f"<b>{_esc(invoice.get('freelance_name') or '—')}</b>", body_style),
-    ]
-    if invoice.get("freelance_company"):
-        freelance_block.append(Paragraph(_esc(invoice["freelance_company"]), body_style))
-    if invoice.get("freelance_email"):
-        freelance_block.append(Paragraph(_esc(invoice["freelance_email"]), body_style))
-
-    parties = Table([[client_block, freelance_block]], colWidths=[90 * mm, 85 * mm])
-    parties.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
-    story.append(parties)
-
-    # ---- Table des montants (en FCFA) ----
-    description = invoice.get("description") or "Prestation facturée"
-    quantity = invoice.get("quantity") or 1
-    unit_price = invoice.get("unit_price", amount)
-    if unit_price is None:
-        unit_price = amount
-    unit_price_fcfa = format_fcfa(unit_price)
-    amount_fcfa = format_fcfa(amount)
-    subtotal_fcfa = format_fcfa(quantity * (_to_float(unit_price) or 0))
-    data = [
-        ["Désignation", "Qté", "Prix unitaire", "Montant HT"],
-        [_esc(description), str(quantity), unit_price_fcfa, subtotal_fcfa],
-        ["Total HT", "", "", amount_fcfa],
-    ]
-    amounts_table = Table(
-        data,
-        colWidths=[80 * mm, 15 * mm, 35 * mm, 40 * mm],
-    )
-    amounts_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f1f1")),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
-        ("GRID", (0, 0), (-1, -2), 0.4, colors.HexColor("#e0e0e0")),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.6, colors.HexColor("#e0e0e0")),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, -1), (-1, -1), 14),
-        ("SPAN", (0, -1), (-2, -1)),
-        ("ALIGN", (0, -1), (-2, -1), "LEFT"),
+            client_lines.append(Paragraph(_esc(val), body_style))
+    client_box = Table([[
+        client_lines,
+        # case vide de droite pour garder le look épuré (pas de bloc "De" ici)
+        "",
+    ]], colWidths=[120 * mm, 55 * mm])
+    client_box.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BOX", (0, 0), (0, 0), 0.6, terra),
+        ("LEFTPADDING", (0, 0), (0, 0), 10),
+        ("BACKGROUND", (0, 0), (0, 0), terra_soft),
     ]))
+    story.append(client_box)
     story.append(Spacer(1, 14))
-    story.append(amounts_table)
 
-    # ---- Métadonnées de bas de page ----
-    meta = Paragraph(
-        "Statut : <b>%s</b><br/>N° de facture : <b>%s</b>" % (
-            _esc(invoice.get("status") or "draft"),
-            _esc(invoice.get("number") or ""),
+    # ---- IMMENSE RÉSUMÉ / TOTAL ----
+    summary_cell = [
+        Paragraph("RÉSUMÉ / SUMMARY", summary_label),
+        Paragraph(format_fcfa(amount), summary_amount),
+        Paragraph(
+            "Date d'échéance : <b>%s</b>" % _esc(invoice.get("due_date") or "paiement dû à réception"),
+            summary_due,
         ),
-        subtitle_style,
-    )
-    story.append(Spacer(1, 20))
-    story.append(meta)
+    ]
+    summary_box = Table([[summary_cell]], colWidths=[175 * mm])
+    summary_box.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 2.5, terra),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#ffe2bd")),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 16),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 16),
+    ]))
+    story.append(summary_box)
+    story.append(Spacer(1, 18))
+
+    # ---- Tableau des lignes ----
+    header_row = ["Désignation", "Qté", "Prix unitaire", "Montant HT"]
+    data = [header_row]
+    for it in items:
+        data.append([
+            _esc(it["description"]),
+            str(it["quantity"]),
+            format_fcfa(it["unit_price"]),
+            format_fcfa(it["amount"]),
+        ])
+    data.append(["TOTAL À PAYER", "", "", format_fcfa(amount)])
+
+    n_rows = len(data)
+    items_table = Table(data, colWidths=[93 * mm, 14 * mm, 34 * mm, 34 * mm])
+    items_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), terra_soft),
+        ("TEXTCOLOR", (0, 0), (-1, 0), terra_dark),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ALIGN", (3, 0), (3, -1), "RIGHT"),
+        ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+        ("ALIGN", (1, 0), (1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, colors.HexColor("#fffaf2")]),
+        ("LINEBELOW", (0, 0), (-1, -2), 0.4, colors.HexColor("#efddc6")),
+        ("LINEBELOW", (0, n_rows - 1), (-1, n_rows - 1), 2, terra),
+        ("SPAN", (0, n_rows - 1), (2, n_rows - 1)),
+        ("FONTNAME", (0, n_rows - 1), (-1, n_rows - 1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, n_rows - 1), (-1, n_rows - 1), 12),
+    ]))
+    story.append(items_table)
+    story.append(Spacer(1, 34))
+
+    # ---- Bloc signature ----
+    sig_lines = [
+        Paragraph("L'ÉMETTEUR (SIGNATURE &amp; CACHET)", party_title),
+        Paragraph(
+            "Je certifie que les prestations ci-dessus ont été réalisées et sont dues.",
+            ParagraphStyle("sigNote", parent=sig_style, textColor=colors.HexColor("#7f8c8d")),
+        ),
+    ]
+    if invoice.get("freelance_name"):
+        sig_lines.append(Paragraph(
+            "<b>%s</b>" % _esc(invoice["freelance_name"]), sig_style))
+    if invoice.get("freelance_company"):
+        sig_lines.append(Paragraph(_esc(invoice["freelance_company"]), sig_style))
+    if invoice.get("freelance_email"):
+        sig_lines.append(Paragraph(_esc(invoice["freelance_email"]), sig_style))
+
+    signature = Table([[sig_lines]], colWidths=[175 * mm])
+    signature.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#efddc6")),
+        ("LINEABOVE", (0, 0), (-1, 0), 3, terra),
+        ("TOPPADDING", (0, 0), (-1, -1), 14),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
+    ]))
+    story.append(signature)
+
+    # Espace blanc pour la signature manuscrite.
+    story.append(Spacer(1, 26))
+    story.append(Paragraph(
+        "Signature &amp; cachet de l'émetteur",
+        ParagraphStyle("sigSpace", parent=subtitle_style,
+                       alignment=TA_RIGHT,
+                       borderColor=terra, borderWidth=0.4, borderPadding=(4, 0, 0, 0)),
+    ))
 
     doc.build(story)
     return buffer.getvalue()

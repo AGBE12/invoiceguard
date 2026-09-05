@@ -5,186 +5,203 @@
     <title>Facture {{ invoice.number }}</title>
     <style>
         * { box-sizing: border-box; }
+        /* =========================================================
+           Thème TERRACOTTA / orange chaud d'Afrique de l'Ouest
+           Couleur force : #b75b0a (et déclinaisons)
+           ========================================================= */
+        :root {
+            --terra:        #b75b0a;   /* orange terreux principal */
+            --terra-dark:   #8f4707;
+            --terra-light:  #ffedd6;   /* fond très clair */
+            --terra-soft:   #fff7eb;
+            --ink:          #2c3e50;
+            --muted:        #7f8c8d;
+            --line:         #efddc6;
+        }
         body {
             font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-            color: #2c3e50;
+            color: var(--ink);
             margin: 0;
             padding: 0;
         }
-        /* --- En-tête émetteur / titre --- */
+
+        /* --- En-tête : brand + titre facture --- */
         .header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 26px;
+            border-bottom: 3px solid var(--terra);
+            padding-bottom: 14px;
+            margin-bottom: 18px;
         }
         .brand h1 {
             margin: 0;
-            color: #b75b0a;          /* terre d'Afrique de l'Ouest */
+            color: var(--terra);
             font-size: 26px;
             letter-spacing: 0.5px;
         }
-        .brand p {
-            margin: 2px 0;
-            color: #7f8c8d;
-        }
-        .invoice-title {
-            text-align: right;
-        }
+        .brand .tagline { color: var(--muted); margin: 2px 0 0 0; font-size: 12px; }
+        .invoice-title { text-align: right; }
         .invoice-title h2 {
             margin: 0;
-            font-size: 22px;
-            color: #ffffff;
-            background: #2c3e50;
+            font-size: 24px;
+            color: #fff;
+            background: var(--terra);
             display: inline-block;
-            padding: 6px 18px;
-            border-radius: 30px;
-            letter-spacing: 3px;
+            padding: 6px 20px;
+            border-radius: 4px;
+            letter-spacing: 4px;
         }
         .invoice-title .number {
-            font-size: 18px;
+            color: var(--terra-dark);
+            font-size: 16px;
             font-weight: bold;
-            color: #b75b0a;
-            margin-top: 10px;
+            margin-top: 8px;
         }
-        .invoice-title p { margin: 3px 0; color: #7f8c8d; }
+        .invoice-title p { margin: 2px 0; color: var(--muted); font-size: 12px; }
 
-        /* --- Coordonnées parties --- */
-        .parties {
-            display: flex;
-            justify-content: space-between;
-            gap: 20px;
-            margin-bottom: 26px;
-        }
+        /* --- Coordonnées : Facturé à (client) --- */
+        .parties { margin-bottom: 20px; }
         .party {
-            width: 48%;
-            background: #faf8f5;
-            border-radius: 8px;
-            padding: 14px 16px;
-            border: 1px solid #f0e6d8;
+            display: inline-block;
+            vertical-align: top;
+            background: var(--terra-soft);
+            border: 1px solid var(--line);
+            border-left: 5px solid var(--terra);
+            border-radius: 6px;
+            padding: 12px 16px;
+            min-width: 280px;
         }
         .party h3 {
-            margin: 0 0 10px 0;
-            font-size: 13px;
+            margin: 0 0 8px 0;
+            font-size: 12px;
             text-transform: uppercase;
             letter-spacing: 1px;
-            color: #b75b0a;
-            border-bottom: 2px solid #e8d8c2;
-            padding-bottom: 6px;
+            color: var(--terra);
         }
-        .party p { margin: 3px 0; }
+        .party p { margin: 3px 0; color: var(--ink); }
 
-        /* --- Encadré RÉSUMÉ / TOTAL À PAYER (impact fort) --- */
+        /* --- IMMENSE BLOC RÉSUMÉ / SUMMARY --- */
         .summary {
-            border: 3px solid #b75b0a;
-            background: linear-gradient(135deg, #fff7ed 0%, #ffe8cc 100%);
-            border-radius: 12px;
-            padding: 22px 26px;
-            margin-bottom: 30px;
+            border: 4px solid var(--terra);
+            background: linear-gradient(135deg, #fff3e0 0%, #ffe2bd 100%);
+            border-radius: 14px;
+            padding: 26px 30px;
+            margin-bottom: 26px;
+            box-shadow: 0 8px 22px rgba(183, 91, 10, 0.22);
             text-align: center;
-            box-shadow: 0 6px 18px rgba(183, 91, 10, 0.18);
+            page-break-inside: avoid;
         }
         .summary .label {
-            font-size: 15px;
-            letter-spacing: 4px;
-            font-weight: bold;
+            font-size: 16px;
+            letter-spacing: 5px;
+            font-weight: 800;
             text-transform: uppercase;
-            color: #b75b0a;
-            margin-bottom: 6px;
+            color: var(--terra);
+            margin-bottom: 8px;
         }
         .summary .amount {
             font-size: 44px;
             line-height: 1.1;
             font-weight: 800;
-            color: #2c3e50;
+            color: var(--ink);
             letter-spacing: 1px;
             font-variant-numeric: tabular-nums;
         }
         .summary .due {
-            margin-top: 10px;
-            font-size: 15px;
-            color: #5a4632;
-        }
-        .summary .due strong {
-            color: #c0392b;
-        }
-
-        /* --- Tableau détaillé (justificatif de contrôle, bas de page) --- */
-        .details-section { margin-top: 34px; }
-        .details-section .heading {
+            margin-top: 12px;
             font-size: 14px;
+            color: var(--ink);
+        }
+        .summary .due strong { color: var(--terra-dark); }
+
+        /* --- Tableau des lignes (justificatif détaillé) --- */
+        .items-section { margin-top: 22px; }
+        .items-section .heading {
+            font-size: 13px;
             text-transform: uppercase;
             letter-spacing: 2px;
-            color: #95a5a6;
-            margin-bottom: 8px;
+            color: var(--terra);
+            border-bottom: 2px solid var(--line);
+            padding-bottom: 6px;
+            margin-bottom: 6px;
+            font-weight: 700;
         }
-        table {
+        table.items {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 16px;
         }
-        th, td {
-            padding: 11px 12px;
-            border-bottom: 1px solid #ecf0f1;
+        table.items th, table.items td {
+            padding: 10px 10px;
+            border-bottom: 1px solid #f0e8dd;
             text-align: left;
         }
-        th {
-            background-color: #f8f9fa;
-            color: #34495e;
+        table.items th {
+            background: var(--terra-soft);
+            color: var(--terra-dark);
             font-size: 12px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        .amount-num { text-align: right; font-variant-numeric: tabular-nums; }
-        .total-row td {
-            font-weight: bold;
+        table.items .num { text-align: right; font-variant-numeric: tabular-nums; }
+        table.items tr:nth-child(even) td { background: #fffcf6; }
+        table.items .total-row td {
+            font-weight: 800;
+            color: var(--ink);
+            border-top: 2px solid var(--terra);
             font-size: 15px;
-            border-top: 2px solid #b75b0a;
-            border-bottom: none;
-            color: #2c3e50;
         }
+        table.items .total-row .num { color: var(--terra-dark); }
 
-        .meta {
-            margin-top: 26px;
-            color: #7f8c8d;
-            font-size: 13px;
-        }
-        .meta p { margin: 3px 0; }
-        .meta span.badge {
-            background: #d4efdf;
-            color: #1e8449;
-            padding: 2px 10px;
-            border-radius: 12px;
-            font-weight: bold;
-            text-transform: capitalize;
-        }
-        .footer {
+        /* --- Bloc signature officiel (bas de page) --- */
+        .signature {
             margin-top: 44px;
-            text-align: center;
-            color: #bdc3c7;
-            font-size: 12px;
-            border-top: 1px dashed #e0d7cc;
-            padding-top: 14px;
+            border: 1px solid var(--line);
+            border-top: 4px solid var(--terra);
+            padding: 18px 20px 12px 20px;
+            page-break-inside: avoid;
         }
-        .footer .thanks { font-size: 13px; color: #b75b0a; font-weight: bold; }
+        .signature h4 {
+            margin: 0 0 6px 0;
+            color: var(--terra);
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .signature .sig-role {
+            color: var(--muted);
+            font-size: 12px;
+            margin-bottom: 14px;
+        }
+        .signature .emit-name    { font-weight: 700; }
+        .signature .emit-company { color: var(--ink); }
+        .signature .emit-email   { color: var(--muted); }
+        .signature .sig-space {
+            margin-top: 22px;
+            border-top: 1px dashed var(--terra);
+            padding-top: 8px;
+            color: var(--muted);
+            font-size: 12px;
+            text-align: right;
+        }
     </style>
 </head>
 <body>
+    <!-- ============ EN-TÊTE ============ -->
     <div class="header">
         <div class="brand">
             <h1>{{ invoice.company_name or invoice.freelance_name }}</h1>
-            {% if invoice.freelance_email %}<p>{{ invoice.freelance_email }}</p>{% endif %}
-            {% if invoice.freelance_phone %}<p>{{ invoice.freelance_phone }}</p>{% endif %}
-            {% if invoice.freelance_address %}<p>{{ invoice.freelance_address }}</p>{% endif %}
+            {% if invoice.freelance_address %}<p class="tagline">{{ invoice.freelance_address }}</p>{% endif %}
         </div>
         <div class="invoice-title">
             <h2>FACTURE</h2>
             <p class="number">{{ invoice.number }}</p>
             <p>Date d'émission : {{ invoice.issue_date }}</p>
+            {% if invoice.due_date %}<p>Échéance : {{ invoice.due_date }}</p>{% endif %}
         </div>
     </div>
 
-    <!-- Coordonnées : client (facturé à) + émetteur (de) -->
+    <!-- ============ FACTURÉ À (client) ============ -->
     <div class="parties">
         <div class="party">
             <h3>Facturé à</h3>
@@ -193,17 +210,9 @@
             {% if invoice.client.phone %}<p>{{ invoice.client.phone }}</p>{% endif %}
             {% if invoice.client.address %}<p>{{ invoice.client.address }}</p>{% endif %}
         </div>
-        <div class="party">
-            <h3>De</h3>
-            <p><strong>{{ invoice.freelance_name }}</strong></p>
-            {% if invoice.freelance_company %}<p>{{ invoice.freelance_company }}</p>{% endif %}
-            {% if invoice.freelance_email %}<p>{{ invoice.freelance_email }}</p>{% endif %}
-            {% if invoice.freelance_phone %}<p>{{ invoice.freelance_phone }}</p>{% endif %}
-            {% if invoice.freelance_address %}<p>{{ invoice.freelance_address }}</p>{% endif %}
-        </div>
     </div>
 
-    <!-- GRAND ENCADRÉ : MONTANT TOTAL À PAYER -->
+    <!-- ============ IMMENSE RÉSUMÉ / SUMMARY (TOTAL) ============ -->
     <div class="summary">
         <div class="label">Résumé / Summary</div>
         <div class="amount">{{ invoice.amount | fcfa }}</div>
@@ -216,43 +225,43 @@
         </div>
     </div>
 
-    <!-- Tableau détaillé, en bas : rappel / justificatif de contrôle -->
-    <div class="details-section">
-        <div class="heading">Détail des prestations</div>
-        <table>
+    <!-- ============ TABLEAU DES LIGNES D'OPÉRATION ============ -->
+    <div class="items-section">
+        <div class="heading">Détail des opérations</div>
+        <table class="items">
             <thead>
                 <tr>
                     <th>Désignation</th>
-                    <th>Quantité</th>
-                    <th style="text-align: right;">Prix unitaire</th>
-                    <th style="text-align: right;">Montant HT</th>
+                    <th style="text-align:center;">Qté</th>
+                    <th class="num">Prix unitaire</th>
+                    <th class="num">Montant HT</th>
                 </tr>
             </thead>
             <tbody>
+                {% for item in invoice.line_items %}
                 <tr>
-                    <td>{{ invoice.description }}</td>
-                    <td>{{ invoice.quantity }}</td>
-                    <td class="amount-num">{{ invoice.unit_price | fcfa }}</td>
-                    <td class="amount-num">{{ invoice.amount | fcfa }}</td>
+                    <td>{{ item.description }}</td>
+                    <td style="text-align:center;">{{ item.quantity }}</td>
+                    <td class="num">{{ item.unit_price | fcfa }}</td>
+                    <td class="num">{{ item.amount | fcfa }}</td>
                 </tr>
+                {% endfor %}
                 <tr class="total-row">
-                    <td colspan="3">Total HT</td>
-                    <td class="amount-num">{{ invoice.amount | fcfa }}</td>
+                    <td colspan="3">TOTAL À PAYER</td>
+                    <td class="num">{{ invoice.amount | fcfa }}</td>
                 </tr>
             </tbody>
         </table>
     </div>
 
-    <div class="meta">
-        <p>
-            Statut : <span class="badge">{{ invoice.status }}</span> ·
-            N° de facture : <strong>{{ invoice.number }}</strong>
-        </p>
-    </div>
-
-    <div class="footer">
-        <p class="thanks">Merci pour votre confiance !</p>
-        <p>Merci de régler votre facture dans les meilleurs délais.</p>
+    <!-- ============ L'ÉMETTEUR : SIGNATURE &amp; CACHET ============ -->
+    <div class="signature">
+        <h4>L'Émetteur (Signature &amp; Cachet)</h4>
+        <div class="sig-role">Je certifie que les prestations ci-dessus ont été réalisées et sont dues.</div>
+        <div class="emit-name">{{ invoice.freelance_name }}</div>
+        {% if invoice.freelance_company %}<div class="emit-company">{{ invoice.freelance_company }}</div>{% endif %}
+        {% if invoice.freelance_email %}<div class="emit-email">{{ invoice.freelance_email }}</div>{% endif %}
+        <div class="sig-space">Signature &amp; cachet de l'émetteur</div>
     </div>
 </body>
 </html>
