@@ -115,6 +115,42 @@
         }
         .summary .due strong { color: var(--terra-dark); }
 
+        /* --- Options de règlement en ligne (juste sous le résumé) --- */
+        .payments {
+            margin: 6px 0 0 0;
+            border: 1px solid var(--line);
+            border-left: 5px solid var(--terra);
+            background: var(--terra-soft);
+            border-radius: 8px;
+            padding: 16px 18px;
+            page-break-inside: avoid;
+        }
+        .payments h4 {
+            margin: 0 0 10px 0;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--terra);
+        }
+        .pay-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .pay-btn {
+            display: inline-block;
+            padding: 10px 16px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 800;
+            font-size: 13px;
+            border: 2px solid var(--terra);
+            color: var(--terra-dark);
+            background: #fff;
+            margin: 0;
+        }
+        .pay-btn:hover { background: var(--terra-soft); }
+
         /* --- Tableau des lignes (justificatif détaillé) --- */
         .items-section { margin-top: 22px; }
         .items-section .heading {
@@ -176,13 +212,17 @@
         .signature .emit-name    { font-weight: 700; }
         .signature .emit-company { color: var(--ink); }
         .signature .emit-email   { color: var(--muted); }
+        .signature .emit-address { color: var(--ink); }
+        .signature .emit-phone   { color: var(--ink); }
+        .signature .emit-nif     { font-weight: 700; color: var(--terra-dark); margin-top: 2px; }
         .signature .sig-space {
-            margin-top: 22px;
+            margin-top: 34px;
+            min-height: 80px;               /* espace blanc d'au moins 80px pour signer */
             border-top: 1px dashed var(--terra);
-            padding-top: 8px;
+            padding-top: 10px;
             color: var(--muted);
             font-size: 12px;
-            text-align: right;
+            text-align: left;
         }
     </style>
 </head>
@@ -197,7 +237,7 @@
             <h2>FACTURE</h2>
             <p class="number">{{ invoice.number }}</p>
             <p>Date d'émission : {{ invoice.issue_date }}</p>
-            {% if invoice.due_date %}<p>Échéance : {{ invoice.due_date }}</p>{% endif %}
+            {% if invoice.due_date %}<p>Échéance : {{ invoice.due_date.strftime('%d/%m/%Y') }}</p>{% endif %}
         </div>
     </div>
 
@@ -218,12 +258,27 @@
         <div class="amount">{{ invoice.amount | fcfa }}</div>
         <div class="due">
             {% if invoice.due_date %}
-                Date d'échéance : <strong>{{ invoice.due_date }}</strong>
+                Date d'échéance : <strong>{{ invoice.due_date.strftime('%d/%m/%Y') }}</strong>
             {% else %}
                 Paiement dû à réception
             {% endif %}
         </div>
     </div>
+
+    <!-- ============ OPTIONS DE RÈGLEMENT EN LIGNE (sous le résumé) ============ -->
+    {% if invoice.stripe_payment_link or invoice.mobile_money_payment_link %}
+    <div class="payments">
+        <h4>Options de Règlement en ligne</h4>
+        <div class="pay-buttons">
+            {% if invoice.stripe_payment_link %}
+            <a class="pay-btn" href="{{ invoice.stripe_payment_link }}">Payer par carte bancaire (Stripe)</a>
+            {% endif %}
+            {% if invoice.mobile_money_payment_link %}
+            <a class="pay-btn" href="{{ invoice.mobile_money_payment_link }}">Payer par Mobile Money (Orange, Wave, Moov)</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
 
     <!-- ============ TABLEAU DES LIGNES D'OPÉRATION ============ -->
     <div class="items-section">
@@ -234,7 +289,7 @@
                     <th>Désignation</th>
                     <th style="text-align:center;">Qté</th>
                     <th class="num">Prix unitaire</th>
-                    <th class="num">Montant HT</th>
+                    <th class="num">Montant Total</th>
                 </tr>
             </thead>
             <tbody>
@@ -261,7 +316,10 @@
         <div class="emit-name">{{ invoice.freelance_name }}</div>
         {% if invoice.freelance_company %}<div class="emit-company">{{ invoice.freelance_company }}</div>{% endif %}
         {% if invoice.freelance_email %}<div class="emit-email">{{ invoice.freelance_email }}</div>{% endif %}
-        <div class="sig-space">Signature &amp; cachet de l'émetteur</div>
+        {% if invoice.emitter_address %}<div class="emit-address">{{ invoice.emitter_address }}</div>{% endif %}
+        {% if invoice.emitter_phone %}<div class="emit-phone">{{ invoice.emitter_phone }}</div>{% endif %}
+        {% if invoice.emitter_nif %}<div class="emit-nif">NIF : {{ invoice.emitter_nif }}</div>{% endif %}
+        <div class="sig-space">Espace réservé à la signature &amp; au cachet de l'émetteur</div>
     </div>
 </body>
 </html>

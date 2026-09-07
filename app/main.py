@@ -77,12 +77,13 @@ def read_root() -> dict:
 
 
 # --- Routers ---
-from app.routers import auth, clients, invoices, stripe  # noqa: E402
+from app.routers import auth, billing, clients, invoices, stripe  # noqa: E402
 
 app.include_router(auth.router)
 app.include_router(clients.router)
 app.include_router(invoices.router)
 app.include_router(stripe.router)
+app.include_router(billing.router)
 
 # --- Initialisation Stripe ---
 # Configure la clé secrète au démarrage. Si la clé est manquante, on log

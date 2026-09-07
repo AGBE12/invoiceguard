@@ -174,6 +174,27 @@ def _build_context(invoice_data: dict) -> dict:
     invoice["freelance_email"] = freelance_dict.get("email", "")
     invoice["freelance_address"] = freelance_dict.get("address")
 
+    # --- Coordonnées / mentions légales de l'émetteur (NIF, adresse, tél.) ---
+    # Extraites des objets passés par le routeur, soit via le sous-ensemble
+    # ``freelance`` (download/email), soit via des clés top-level ``emitter_*``.
+    invoice["emitter_nif"] = (
+        invoice.get("emitter_nif") or freelance_dict.get("nif") or ""
+    )
+    invoice["emitter_address"] = (
+        invoice.get("emitter_address")
+        or freelance_dict.get("address")
+        or ""
+    )
+    invoice["emitter_phone"] = (
+        invoice.get("emitter_phone") or freelance_dict.get("phone") or ""
+    )
+
+    # --- Liens de paiement en ligne (Stripe carte / CinetPay Mobile Money) ---
+    invoice["stripe_payment_link"] = invoice.get("stripe_payment_link") or ""
+    invoice["mobile_money_payment_link"] = (
+        invoice.get("mobile_money_payment_link") or ""
+    )
+
     # Nom de marque affiché en haut à gauche.
     invoice.setdefault("company_name", invoice["freelance_company"])
 
@@ -355,7 +376,7 @@ def _generate_pdf_reportlab(context: dict) -> bytes:
     meta_lines = [f"<b>{_esc(invoice.get('number') or '')}</b>",
                   "Émission : %s" % _esc(invoice.get("issue_date") or "—")]
     if invoice.get("due_date"):
-        meta_lines.append("Échéance : %s" % _esc(invoice["due_date"]))
+        meta_lines.append("Échéance : %s" % _esc(_format_date(invoice["due_date"])))
     for ln in meta_lines:
         story.append(Paragraph(ln, subtitle_style))
     story.append(Spacer(1, 10))
@@ -386,7 +407,11 @@ def _generate_pdf_reportlab(context: dict) -> bytes:
         Paragraph("RÉSUMÉ / SUMMARY", summary_label),
         Paragraph(format_fcfa(amount), summary_amount),
         Paragraph(
-            "Date d'échéance : <b>%s</b>" % _esc(invoice.get("due_date") or "paiement dû à réception"),
+            "Date d'échéance : <b>%s</b>" % (
+                _esc(_format_date(invoice.get("due_date")))
+                if invoice.get("due_date")
+                else "paiement dû à réception"
+            ),
             summary_due,
         ),
     ]
@@ -402,7 +427,7 @@ def _generate_pdf_reportlab(context: dict) -> bytes:
     story.append(Spacer(1, 18))
 
     # ---- Tableau des lignes ----
-    header_row = ["Désignation", "Qté", "Prix unitaire", "Montant HT"]
+    header_row = ["Désignation", "Qté", "Prix unitaire", "Montant Total"]
     data = [header_row]
     for it in items:
         data.append([
@@ -434,6 +459,36 @@ def _generate_pdf_reportlab(context: dict) -> bytes:
     story.append(items_table)
     story.append(Spacer(1, 34))
 
+    # ---- Options de règlement en ligne (sous-le-tableau, comme sur HTML) ----
+    stripe_link = invoice.get("stripe_payment_link") or ""
+    momo_link = invoice.get("mobile_money_payment_link") or ""
+    if stripe_link or momo_link:
+        pay_lines = [Paragraph("OPTIONS DE RÈGLEMENT EN LIGNE", party_title)]
+        link_style = ParagraphStyle(
+            "PayLink", parent=body_style, fontSize=10,
+            textColor=colors.HexColor(TERRA_DARK), spaceBefore=4, spaceAfter=2,
+        )
+        if stripe_link:
+            pay_lines.append(Paragraph(
+                '<link href="%s"><font color="#b75b0a">Payer par carte bancaire '
+                '(Stripe)</font></link>' % stripe_link, link_style))
+        if momo_link:
+            pay_lines.append(Paragraph(
+                '<link href="%s"><font color="#b75b0a">Payer par Mobile Money '
+                '(Orange, Wave, Moov)</font></link>' % momo_link, link_style))
+        pay_table = Table([[pay_lines]], colWidths=[175 * mm])
+        pay_table.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#efddc6")),
+            ("LINEBEFORE", (0, 0), (0, -1), 3, terra),
+            ("BACKGROUND", (0, 0), (-1, -1), terra_soft),
+            ("LEFTPADDING", (0, 0), (-1, -1), 10),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+            ("TOPPADDING", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ]))
+        story.append(pay_table)
+        story.append(Spacer(1, 18))
+
     # ---- Bloc signature ----
     sig_lines = [
         Paragraph("L'ÉMETTEUR (SIGNATURE &amp; CACHET)", party_title),
@@ -449,6 +504,14 @@ def _generate_pdf_reportlab(context: dict) -> bytes:
         sig_lines.append(Paragraph(_esc(invoice["freelance_company"]), sig_style))
     if invoice.get("freelance_email"):
         sig_lines.append(Paragraph(_esc(invoice["freelance_email"]), sig_style))
+    # Adresse / téléphone / NIF de l'émetteur (figés sur la facture).
+    if invoice.get("emitter_address"):
+        sig_lines.append(Paragraph(_esc(invoice["emitter_address"]), sig_style))
+    if invoice.get("emitter_phone"):
+        sig_lines.append(Paragraph(_esc(invoice["emitter_phone"]), sig_style))
+    if invoice.get("emitter_nif"):
+        sig_lines.append(Paragraph("NIF : %s" % _esc(invoice["emitter_nif"]), 
+                                   ParagraphStyle("Nif", parent=sig_style, fontName="Helvetica-Bold")))
 
     signature = Table([[sig_lines]], colWidths=[175 * mm])
     signature.setStyle(TableStyle([
@@ -459,17 +522,33 @@ def _generate_pdf_reportlab(context: dict) -> bytes:
     ]))
     story.append(signature)
 
-    # Espace blanc pour la signature manuscrite.
-    story.append(Spacer(1, 26))
+    # Espace blanc d'au moins 80px pour la signature manuscrite.
+    story.append(Spacer(1, 210))
     story.append(Paragraph(
-        "Signature &amp; cachet de l'émetteur",
+        "Espace réservé à la signature &amp; cachet de l'émetteur",
         ParagraphStyle("sigSpace", parent=subtitle_style,
                        alignment=TA_RIGHT,
-                       borderColor=terra, borderWidth=0.4, borderPadding=(4, 0, 0, 0)),
+                       borderColor=terra, borderWidth=0.4,
+                       borderPadding=(4, 0, 0, 0),
+                       spaceBefore=6),
     ))
 
     doc.build(story)
     return buffer.getvalue()
+
+
+def _format_date(value) -> str:
+    """Formate une valeur de date au format français ``JJ/MM/AAAA``.
+
+    Gère aussi bien les objets ``date``/``datetime`` (via ``strftime``) qu'une
+    chaîne déjà fournie (retournée telle quelle).
+    """
+    if hasattr(value, "strftime"):
+        try:
+            return value.strftime("%d/%m/%Y")
+        except Exception:  # noqa: BLE001
+            pass
+    return str(value) if value is not None else ""
 
 
 def _esc(text: str) -> str:

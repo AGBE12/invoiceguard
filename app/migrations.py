@@ -28,12 +28,24 @@ from sqlalchemy.engine import Engine
 
 logger = logging.getLogger(__name__)
 
-# Colonnes à garantir sur la table `invoices` (déjà gérées par une ancienne passe).
-# Conservées pour idempotence : elles ne seront jamais ajoutées si déjà présentes.
+# Colonnes à garantir sur la table `invoices` (additionnées au fil des
+# itérations successives : multi-lignes, échéance, puis paiement & mentions
+# légales). Conservées pour idempotence : elles ne seront jamais ajoutées si
+# déjà présentes.
 _INVOICE_COLUMNS = {
+    # --- Structure échéance / relances ---------------------------------
+    "due_date": "DATETIME",
+    # --- Structure des lignes d'opération (multi-lignes) ----------------
     "description": "VARCHAR(500)",
     "quantity": "INTEGER NOT NULL DEFAULT 1",
     "unit_price": "NUMERIC(12,2)",
+    # --- Axe paiement en ligne (billing) -------------------------------
+    "stripe_payment_link": "VARCHAR(500)",
+    "mobile_money_payment_link": "VARCHAR(500)",
+    # --- Axe conformité légale Mali / UEMOA (mention de l'émetteur) ------
+    "emitter_nif": "VARCHAR(50)",
+    "emitter_address": "VARCHAR(255)",
+    "emitter_phone": "VARCHAR(30)",
 }
 
 # DDL de création de la table des lignes d'opération, défini par dialecte dans

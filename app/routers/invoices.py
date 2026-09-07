@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from decimal import Decimal
 
@@ -16,7 +17,10 @@ from app.models.client import Client
 from app.models.invoice import Invoice, InvoiceItem, InvoiceStatus
 from app.models.user import User
 from app.schemas.invoice import InvoiceCreate, InvoiceOut, InvoiceUpdate
+from app.services import mobile_money_service, stripe_service
 from app.services.pdf_generator import PDFGenerationError, generate_invoice_pdf
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
@@ -75,6 +79,51 @@ def _compute_total(items) -> Decimal:
     return total
 
 
+def _auto_generate_payment_links(db: Session, invoice: Invoice) -> None:
+    """Génère et persiste automatiquement les liens de paiement d'une facture.
+
+    Appelée au moment de la création d'une facture pour que celle-ci « naisse
+    payable » : on initie à la fois la session Stripe Checkout (carte, devise
+    ``xof`` sans ×100) et le lien CinetPay (Mobile Money, devise ``XOF``),
+    puis on écrit les deux URL dans les colonnes ``stripe_payment_link`` et
+    ``mobile_money_payment_link`` avant de valider la transaction finalement.
+
+    La génération est **best-effort** : si l'un ou l'autre fournisseur échoue
+    (clé non configurée, panne réseau, API indisponible…), on log un
+    avertissement et on continue — la facture reste créée et l'utilisateur
+    pourra toujours régénérer les liens via le routeur ``billing``. La création
+    de la facture ne doit jamais être bloquée par la disponibilité d'un
+    prestataire de paiement.
+    """
+    # --- 1. Carte bancaire via Stripe Checkout (devise XOF, sans ×100) ---
+    try:
+        result = stripe_service.create_checkout_session(invoice)
+        invoice.stripe_payment_link = result["checkout_url"]
+    except Exception as exc:  # noqa: BLE001  (StripeError ou erreur inattendue)
+        logger.warning(
+            "Auto-génération Stripe échouée pour la facture %s : %s",
+            invoice.invoice_number,
+            exc,
+        )
+
+    # --- 2. Mobile Money via CinetPay (devise XOF) ---
+    try:
+        result = mobile_money_service.create_mobile_money_link(invoice)
+        invoice.mobile_money_payment_link = result["payment_url"]
+    except Exception as exc:  # noqa: BLE001  (CinetPayError ou erreur inattendue)
+        logger.warning(
+            "Auto-génération CinetPay échouée pour la facture %s : %s",
+            invoice.invoice_number,
+            exc,
+        )
+
+    # Ne persiste un changement que si au moins un lien a pu être généré.
+    if invoice.stripe_payment_link or invoice.mobile_money_payment_link:
+        db.add(invoice)
+        db.commit()
+        db.refresh(invoice)
+
+
 @router.get("", response_model=list[InvoiceOut], summary="Liste mes factures")
 def list_invoices(
     db: Session = Depends(get_db),
@@ -120,6 +169,9 @@ def create_invoice(
         amount=total,
         status=payload.status.value,
         due_date=payload.due_date,
+        emitter_nif=payload.emitter_nif,
+        emitter_address=payload.emitter_address,
+        emitter_phone=payload.emitter_phone,
     )
     # Renseigne les lignes d'opération (persistées en cascade par la relation).
     new_invoice.items = [
@@ -131,9 +183,22 @@ def create_invoice(
         for item in payload.items
     ]
 
+    # ---- Persistance de la facture ----
+    # Premier commit : on fixe l'identifiant et les colonnes « métier » de la
+    # facture en base pour disposer d'un état stable et récupérable.
     db.add(new_invoice)
     db.commit()
     db.refresh(new_invoice)
+
+    # ---- Automatisation : la facture naît payable ----
+    # Juste après l'enregistrement en BDD, on génère AUTOMATIQUEMENT les deux
+    # liens de paiement (Stripe + CinetPay) qui alimentent les colonnes
+    # ``stripe_payment_link`` et ``mobile_money_payment_link``, puis on valide
+    # la transaction définitivement (le second commit de _auto_generate_payment_links).
+    # Best-effort : si la configuration de paiement est absente ou l'appel
+    # réseau échoue, la facture reste quand même créée (log d'avertissement).
+    _auto_generate_payment_links(db, new_invoice)
+
     return new_invoice
 
 
@@ -200,11 +265,16 @@ def download_invoice(
             "full_name": current_user.full_name,
             "company_name": current_user.company_name,
             "email": current_user.email,
-            # L'utilisateur ne porte pas de phone/address en base ; on les laisse
-            # vides, le bloc signature en affichera seulement ce qui est connu.
-            "phone": None,
-            "address": None,
+            # Adresse physique / téléphone / NIF de l'émetteur pour le PDF,
+            # figés sur la facture au moment de l'émission (Mali / UEMOA).
+            "phone": invoice.emitter_phone,
+            "address": invoice.emitter_address,
+            "nif": invoice.emitter_nif,
         },
+        # Liens de paiement en ligne (renseignés après la génération via le
+        # routeur billing) — affichés sur le PDF s'ils existent.
+        "stripe_payment_link": invoice.stripe_payment_link,
+        "mobile_money_payment_link": invoice.mobile_money_payment_link,
     }
 
     try:
@@ -254,6 +324,11 @@ def update_invoice(
     if "invoice_number" in update_data:
         invoice.invoice_number = update_data["invoice_number"]
 
+    # Coordonnées / mentions légales de l'émetteur, mises à jour si fournies.
+    for field in ("emitter_nif", "emitter_address", "emitter_phone"):
+        if field in update_data:
+            setattr(invoice, field, update_data[field])
+
     # Remplacement complet des lignes si une nouvelle liste est fournie.
     if "items" in update_data and update_data["items"] is not None:
         invoice.items.clear()
@@ -297,8 +372,23 @@ def delete_invoice(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Response:
-    """Supprime une facture appartenant à l'utilisateur connecté."""
+    """Supprime une facture appartenant à l'utilisateur connecté.
+
+    Condition de sécurité stricte : on refuse la suppression d'une facture dont
+    le statut est ``paid`` afin de protéger l'intégrité comptable de
+    l'utilisateur (une facture réglée est un document légal/fiscal à conserver).
+    """
     invoice = _get_own_invoice(invoice_id, current_user.id, db)
+
+    if invoice.status == InvoiceStatus.PAID.value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Impossible de supprimer une facture déjà payée "
+                "(intégrité comptable)."
+            ),
+        )
+
     db.delete(invoice)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

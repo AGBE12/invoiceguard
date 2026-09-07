@@ -63,6 +63,39 @@ class Settings(BaseSettings):
     checkout_success_url: str = "http://localhost:8000/?success=true"
     checkout_cancel_url: str = "http://localhost:8000/?cancel=true"
 
+    # --- Backend (base des URLs de notification) ---
+    # URL publique de base de l'API. Utilisée pour construire les URLs de
+    # notification (ex : webhook CinetPay) envoyées aux fournisseurs de
+    # paiement afin qu'ils nous rappellent au moment du virement.
+    backend_url: str = "http://localhost:8000"
+
+    # --- CinetPay (Mobile Money, UEMOA — devise XOF) ---
+    # Identifiants de la place de marché CinetPay. Obtenus depuis le tableau
+    # de bord CinetPay (https://cinetpay.com) dans « Mes identifiants ».
+    cinetpay_api_key: str = ""
+    cinetpay_site_id: str = ""
+
+    # Mode d'environnement CinetPay : "TEST" (bac à sable) ou "PRODUCTION".
+    # À définir en fonction de l'environnement d'exécution.
+    cinetpay_mode: str = "TEST"
+
+    # URL d'initiation du paiement CinetPay (API Checkout v2).
+    cinetpay_checkout_url: str = "https://api-checkout.cinetpay.com/v2/payment"
+
+    # URL de redirection du client APRÈS un paiement réussi/annulé CinetPay.
+    cinetpay_success_url: str = "http://localhost:8000/?payment=success"
+    cinetpay_cancel_url: str = "http://localhost:8000/?payment=cancel"
+
+    # --- Email (envoi de factures par SMTP) ---
+    # Serveur SMTP sortant et identifiants associés.
+    smtp_server: str = ""
+    smtp_port: int = 587
+    # Identifiants SMTP (souvent identiques à l'adresse expéditrice).
+    smtp_username: str = ""
+    smtp_password: str = ""
+    # Adresse d'expédition affichée dans les e-mails envoyés.
+    email_from: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -72,4 +105,5 @@ def get_settings() -> Settings:
 
 # Instance partagée utilisée dans toute l'application
 settings = get_settings()
+
 

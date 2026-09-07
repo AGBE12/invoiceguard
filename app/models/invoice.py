@@ -6,11 +6,10 @@ stockées dans la table normale ``invoice_items`` via une relation One-to-Many.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from enum import Enum
 
 from sqlalchemy import (
-    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -60,7 +59,31 @@ class Invoice(Base):
         String(20), default=InvoiceStatus.DRAFT, nullable=False
     )
 
-    due_date: Mapped[date] = mapped_column(Date, nullable=True)
+    # Date d'échéance : alimente l'alerte / cron de relance pour les factures
+    # non réglées.
+    # Non nullable : la relance automatique s'appuie sur une échéance toujours
+    # renseignée. DATETIME pour raisonner à l'heure près.
+    due_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    # Liens de paiement en ligne générés (renseignés par le routeur billing) :
+    #   - carte bancaire via Stripe Checkout ;
+    #   - paiement Mobile Money via CinetPay (UEMOA) — prévue en XOF.
+    stripe_payment_link: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )
+    mobile_money_payment_link: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )
+
+    # Coordonnées / identifiants légaux de l'ÉMETTEUR au moment de l'émission.
+    # Conformité Mali : le « Numéro d'Identification Fiscale » (NIF) est la
+    # mention légale obligatoire portée sur la facture (art. UEMOA / CGI).
+    # On les fige sur la facture pour rester fidèle à ce qui a été émis.
+    emitter_nif: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    emitter_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    emitter_phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -83,7 +106,6 @@ class Invoice(Base):
     # Relations (à adapter selon vos modèles déjà définis)
     client = relationship("Client", back_populates="invoices")
     user = relationship("User", back_populates="invoices")
-
     def __repr__(self) -> str:
         return (
             f"<Invoice id={self.id} invoice_number={self.invoice_number!r} "
@@ -113,3 +135,4 @@ class InvoiceItem(Base):
             f"<InvoiceItem id={self.id} qty={self.quantity} "
             f"unit={self.unit_price} desc={self.description!r}>"
         )
+

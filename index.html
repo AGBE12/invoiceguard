@@ -292,9 +292,24 @@
                         </div>
                         <button type="button" id="addItemBtn" class="ghost small" style="margin-top:10px;">+ Ajouter une ligne</button>
                     </div>
-                    <div class="form-group" style="margin-top:6px;">
-                        <label for="invDueDate">Date d'échéance (optionnel)</label>
-                        <input type="date" id="invDueDate" style="width:100%;">
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="invDueDate">Date d'échéance *</label>
+                            <input type="date" id="invDueDate" required  style="width:100%;">
+                            <small style="color:var(--muted); font-size:11px;">Date limite de règlement (relances).</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="invEmitterNif">Votre NIF</label>
+                            <input type="text" id="invEmitterNif" placeholder="NIF 083 123 456 Malien">
+                        </div>
+                        <div class="form-group">
+                            <label for="invEmitterAddress">Votre Adresse Pro</label>
+                            <input type="text" id="invEmitterAddress" placeholder="Avenue de la Nation, Bamako">
+                        </div>
+                        <div class="form-group">
+                            <label for="invEmitterPhone">Votre Téléphone Pro</label>
+                            <input type="text" id="invEmitterPhone" placeholder="+223 70 00 00 00">
+                        </div>
                     </div>
                     <button id="createInvoiceBtn" style="margin-top:6px;">Créer la facture</button>
                 </div>
@@ -334,6 +349,8 @@
         const clientsMsg = $("clientsMsg"), clientsList = $("clientsList");
 
         const invClientId = $("invClientId"), invDueDate = $("invDueDate");
+        const invEmitterNif = $("invEmitterNif"), invEmitterAddress = $("invEmitterAddress"),
+              invEmitterPhone = $("invEmitterPhone");
         const invGrandTotal = $("invGrandTotal");
         const itemsBody = $("itemsBody"), addItemBtn = $("addItemBtn");
         const invoicesMsg = $("invoicesMsg"), invoicesList = $("invoicesList");
@@ -577,7 +594,9 @@
                                 ' <button class="small" data-email="' + inv.id + '">Envoyer par e-mail 📧</button>' +
                                 (paid
                                     ? ""
-                                    : ' <button class="small" data-checkout="' + inv.id + '">Payer par carte 💳</button>'
+                                    :
+                                    ' <button class="small" data-pay-card="' + inv.id + '">Payer par carte 💳</button>' +
+                                    ' <button class="small success" data-pay-momo="' + inv.id + '">Mobile Money 📱</button>'
                                 ) +
                             "</td></tr>";
                     }).join("") +
@@ -676,46 +695,64 @@
                     });
                 });
 
-                // Paiement Stripe Checkout : POST -> récupère checkout_url -> redirige.
-                invoicesList.querySelectorAll("[data-checkout]").forEach((btn) => {
-                    btn.addEventListener("click", async () => {
-                        const id = btn.dataset.checkout;
-                        const token = getToken();
-                        if (!token) return show(invoicesMsg, "Connectez-vous d'abord.", "error");
+                // ---- Paiement unifié : POST /billing/invoices/{id}/generate-payment-links ----
+                // L'endpoint (authentifié Bearer) retourne les DEUX liens de paiement
+                // à jour : stripe_payment_link (carte) et mobile_money_payment_link
+                // (Mobile Money Orange/Wave/Moov). On redirige ensuite selon le moyen choisi.
+                async function payInvoice(invoiceId, method, btn) {
+                    if (!getToken()) return show(invoicesMsg, "Connectez-vous d'abord.", "error");
 
-                        // Anti double-clic : désactive le bouton pendant la requête.
-                        btn.disabled = true;
-                        const original = btn.textContent;
-                        btn.textContent = "…";
+                    // Anti double-clic : désactive le bouton pendant la requête.
+                    btn.disabled = true;
+                    const original = btn.textContent;
+                    btn.textContent = "…";
 
-                        try {
-                            const res = await fetch(
-                                API_BASE + "/api/invoices/" + id + "/checkout",
-                                {
-                                    method: "POST",
-                                    headers: { "Authorization": "Bearer " + token },
-                                }
-                            );
-
-                            if (!res.ok) {
-                                let detail = "HTTP " + res.status;
-                                try { detail = (await res.json()).detail || detail; } catch (_) {}
-                                throw new Error(detail);
+                    try {
+                        const res = await fetch(
+                            API_BASE + "/billing/invoices/" + invoiceId + "/generate-payment-links",
+                            {
+                                method: "POST",
+                                headers: { "Authorization": "Bearer " + getToken() },
                             }
+                        );
 
-                            const data = await res.json();
-                            if (!data.checkout_url) {
-                                throw new Error("Stripe n'a pas renvoyé d'URL de paiement.");
-                            }
-
-                            // Redirection immédiate vers le portail de paiement Stripe.
-                            window.location.href = data.checkout_url;
-                        } catch (e) {
-                            // Réaffiche le bouton d'origine si la redirection échoue.
-                            btn.disabled = false;
-                            btn.textContent = original;
-                            show(invoicesMsg, "Erreur paiement : " + e.message, "error");
+                        if (!res.ok) {
+                            let detail = "HTTP " + res.status;
+                            try { detail = (await res.json()).detail || detail; } catch (_) {}
+                            throw new Error(detail);
                         }
+
+                        const data = await res.json();
+                        // Backend unifié : récupère les liens retournés (carte / Mobile Money).
+                        const stripeLink = data.stripe_payment_link || data.stripe_link;
+                        const momoLink = data.mobile_money_payment_link || data.mobile_money_link;
+
+                        if (method === "card") {
+                            if (!stripeLink) throw new Error("Aucun lien de paiement carte dans la réponse.");
+                            window.location.href = stripeLink;   // redirection Stripe Checkout
+                        } else { // method === "momo"
+                            if (!momoLink) throw new Error("Aucun lien Mobile Money dans la réponse.");
+                            window.location.href = momoLink;     // redirection CinetPay
+                        }
+                    } catch (e) {
+                        // Réaffiche le bouton d'origine si la redirection échoue.
+                        btn.disabled = false;
+                        btn.textContent = original;
+                        show(invoicesMsg, "Erreur paiement : " + e.message, "error");
+                    }
+                }
+
+                invoicesList.querySelectorAll("[data-pay-card]").forEach((btn) => {
+                    btn.addEventListener("click", () => {
+                        const id = btn.dataset.payCard;
+                        payInvoice(id, "card", btn);
+                    });
+                });
+
+                invoicesList.querySelectorAll("[data-pay-momo]").forEach((btn) => {
+                    btn.addEventListener("click", () => {
+                        const id = btn.dataset.payMomo;
+                        payInvoice(id, "momo", btn);
                     });
                 });
             } catch (e) {
@@ -820,13 +857,23 @@
             const total = recalcAll();
             if (total <= 0) return show(invoicesMsg, "Le montant total doit être supérieur à 0.", "error");
 
+            // Date d'échéance obligatoire (input type=date "required").
+            if (!invDueDate.value) {
+                return show(invoicesMsg, "La date d'échéance est obligatoire.", "error");
+            }
+
             const payload = {
                 client_id: Number(clientId),
                 items: items,
                 amount: total,
                 status: "draft",
+                // Les 4 champs de l'émetteur + l'échéance, injectés dans le corps
+                // de la requête POST /invoices.
+                due_date: invDueDate.value + "T00:00:00",
+                emitter_nif: invEmitterNif.value.trim(),
+                emitter_address: invEmitterAddress.value.trim(),
+                emitter_phone: invEmitterPhone.value.trim(),
             };
-            if (invDueDate.value) payload.due_date = invDueDate.value;
 
             try {
                 const r = await api("/invoices", {
@@ -837,6 +884,9 @@
                 show(invoicesMsg, "✅ Facture « " + r.body.invoice_number + " » créée.", "success");
                 // Réinitialise le formulaire : une ligne vierge d'attente.
                 invDueDate.value = "";
+                invEmitterNif.value = "";
+                invEmitterAddress.value = "";
+                invEmitterPhone.value = "";
                 itemsBody.innerHTML = "";
                 addInvoiceRow();
                 await renderInvoices();
